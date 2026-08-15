@@ -315,21 +315,22 @@ function injectWallpaperCss(win) {
       height: 100vh !important;
       z-index: -1 !important;
       pointer-events: none !important;
-      background-image: var(--dsh-wallpaper-url) !important;
       background-position: center !important;
       background-size: cover !important;
       background-repeat: no-repeat !important;
     }
-    /* 全窗：标准模糊 */
+    /* 全窗：标准模糊，主壁纸 */
     body::before {
       left: 0 !important;
       right: 0 !important;
+      background-image: var(--dsh-wallpaper-url) !important;
       filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
     }
-    /* 左侧栏区域：更糊 1.6 倍（盖在 ::before 之上） */
+    /* 左侧栏区域：更糊 1.6 倍（盖在 ::before 之上）；单独设置时用独立图，否则沿用主图 */
     body::after {
       left: 0 !important;
       width: var(--dsh-sidebar-w, 280px) !important;
+      background-image: var(--dsh-wallpaper-url-sidebar, var(--dsh-wallpaper-url)) !important;
       filter: blur(calc(var(--dsh-wallpaper-blur, 18px) * 1.6)) !important;
     }
     #root [data-slot='root'] > div,
@@ -337,10 +338,9 @@ function injectWallpaperCss(win) {
     #root [data-slot='root'] > div > div > [data-slot] > div {
       background: var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) !important;
     }
-    /* 输入框上方的渐变白带（composerSeat 的 transparent→bg-base 渐变）：
-       改为主面板同色，消除半透明面板下的白色渐变带 */
+    /* 输入框区域：彻底透明，让壁纸直接透出（原渐变白带一并消失） */
     #root [class*='composerSeat'] {
-      background: var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) !important;
+      background: transparent !important;
     }`
   wallpaperCssKey = win.webContents.insertCSS(css)
   wallpaperCssKey.catch(() => { wallpaperCssKey = null })
@@ -358,6 +358,31 @@ function setWallpaperLayer(win, dataUrl) {
     }
     return document.body.style.getPropertyValue('--dsh-wallpaper-url').slice(0, 40)
   })()`)
+}
+
+/** 设置/清除侧栏独立壁纸（dataUrl 为 null 时清除，侧栏回落共用主壁纸）。 */
+function setSidebarWallpaperLayer(win, dataUrl) {
+  const expr = dataUrl === null
+    ? `document.body.style.removeProperty('--dsh-wallpaper-url-sidebar'); return '(cleared)'`
+    : `document.body.style.setProperty('--dsh-wallpaper-url-sidebar', "url('${dataUrl}')");
+       return document.body.style.getPropertyValue('--dsh-wallpaper-url-sidebar').slice(0, 40)`
+  return win.webContents.executeJavaScript(`(() => { ${expr} })()`)
+}
+
+/** 当前侧栏壁纸路径（配置，未单独设置时为 null）。 */
+function configuredSidebarWallpaper() {
+  const cfg = loadConfig()
+  const candidate = cfg.sidebarWallpaper
+  if (candidate && fs.existsSync(candidate)) return path.resolve(candidate)
+  return null
+}
+
+/** 启动时应用侧栏壁纸（未单独设置则无操作，共用主壁纸）。 */
+function applySidebarWallpaper(win) {
+  const file = configuredSidebarWallpaper()
+  if (file === null) return
+  setSidebarWallpaperLayer(win, wallpaperDataUrl(file))
+    .catch((error) => log('sidebar wallpaper failed:', String(error)))
 }
 
 /** 页面加载后应用壁纸：只做一次性 CSS 变量设置 + 写入壁纸 data URL。
@@ -482,9 +507,11 @@ function configuredWallpaper() {
 }
 
 /** 构建壁纸设置对话框的 HTML（DSH 暗色风格，与关闭对话框一致）。
- *  @param blur 当前模糊值；@param codeAlpha 当前代码块透明度；@param image 当前壁纸路径或 null */
-function buildWallpaperDialogHtml(blur, codeAlpha, image) {
+ *  @param blur 当前模糊值；@param codeAlpha 当前代码块透明度；@param image 当前壁纸路径或 null；
+ *  @param sidebarImage 侧栏独立壁纸路径或 null（null = 共用主壁纸） */
+function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage) {
   const imageName = image === null ? '（无）' : path.basename(image)
+  const sidebarName = sidebarImage === null ? '（无）' : path.basename(sidebarImage)
   const alphaPct = Math.round(codeAlpha * 100)
   return `<!doctype html>
 <html lang="zh-CN">
@@ -526,6 +553,15 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image) {
     cursor: pointer; flex: none;
   }
   .smallbtn:hover { background: var(--hover-bg); }
+  .seg { display: flex; gap: 6px; flex: 1; min-width: 0; }
+  .segbtn {
+    height: 26px; padding: 0 8px; border-radius: 13px; border: 1px solid var(--border-l2);
+    background: transparent; color: var(--label-secondary); font-size: 12px; font-family: inherit;
+    cursor: pointer; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .segbtn.on { background: rgba(77,107,254,.18); border-color: var(--accent); color: var(--accent); }
+  .segbtn:hover { background: var(--hover-bg); }
+  .segbtn.on:hover { background: rgba(77,107,254,.26); }
   .footer { margin-top: auto; display: flex; justify-content: flex-end; align-items: center;
             gap: 10px; padding: 16px 20px 18px; }
   .btn {
@@ -550,6 +586,20 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image) {
         <button class="smallbtn" id="pick">更换…</button>
         <button class="smallbtn" id="clearimg">清除</button>
       </div>
+      <div class="row">
+        <span class="label">侧栏壁纸</span>
+        <div class="seg">
+          <button class="segbtn ${sidebarImage === null ? 'on' : ''}" id="modeShared">与主界面共用</button>
+          <button class="segbtn ${sidebarImage !== null ? 'on' : ''}" id="modeSep">单独设置</button>
+        </div>
+      </div>
+      <div class="imgrow" id="sidebarRow" style="${sidebarImage === null ? 'display:none' : ''}">
+        <span class="label">侧栏图片</span>
+        <span class="imgname" id="sideimgname">${sidebarName}</span>
+        <button class="smallbtn" id="sidepick">更换…</button>
+        <button class="smallbtn" id="sideclear">清除</button>
+      </div>
+      <div class="desc" style="margin-top:6px;padding-left:104px">单独设置时侧栏用独立图片（仍比中间更模糊）。</div>
       <div class="row">
         <span class="label">模糊程度</span>
         <input type="range" id="blur" min="0" max="64" step="1" value="${blur}">
@@ -577,6 +627,18 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image) {
     const blurVal = document.getElementById('blurval')
     const alphaVal = document.getElementById('alphaval')
     const imgName = document.getElementById('imgname')
+    const modeShared = document.getElementById('modeShared')
+    const modeSep = document.getElementById('modeSep')
+    const sidebarRow = document.getElementById('sidebarRow')
+    const sideImgName = document.getElementById('sideimgname')
+    const setMode = (separate) => {
+      modeShared.classList.toggle('on', !separate)
+      modeSep.classList.toggle('on', separate)
+      sidebarRow.style.display = separate ? '' : 'none'
+      api.setSidebarMode(separate ? 'separate' : 'shared')
+    }
+    modeShared.addEventListener('click', () => setMode(false))
+    modeSep.addEventListener('click', () => setMode(true))
     const preview = () => {
       blurVal.textContent = blurEl.value + 'px'
       alphaVal.textContent = alphaEl.value + '%'
@@ -586,8 +648,14 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image) {
     alphaEl.addEventListener('input', preview)
     document.getElementById('pick').addEventListener('click', () => api.pickImage())
     document.getElementById('clearimg').addEventListener('click', () => api.clearImage())
+    document.getElementById('sidepick').addEventListener('click', () => api.pickSidebarImage())
+    document.getElementById('sideclear').addEventListener('click', () => api.clearSidebarImage())
     api.onImageChosen((file) => {
       imgName.textContent = file === null ? '（无）' : file.split(/[\\\\/]/).pop()
+    })
+    api.onSidebarImageChosen((file) => {
+      sideImgName.textContent = file === null ? '（无）' : file.split(/[\\\\/]/).pop()
+      if (file !== null) setMode(true)
     })
     document.getElementById('reset').addEventListener('click', () => {
       blurEl.value = 18; alphaEl.value = 45; preview()
@@ -609,7 +677,9 @@ let blurDialog = null
 let blurOriginal = 18
 let codeOriginal = 0.45
 let imageOriginal = null
-let imageDraft = null // 对话框内更换后的新壁纸路径（null 表示无）
+let imageDraft = null // 对话框内更换后的主壁纸路径（null 表示无）
+let sidebarOriginal = null // 对话框打开时的侧栏壁纸（null = 共用主图）
+let sidebarDraft = null // 对话框内侧栏壁纸草稿（null = 共用主图）
 
 /** 恢复对话框打开前的壁纸状态（取消时）。 */
 function restoreWallpaperState() {
@@ -617,6 +687,8 @@ function restoreWallpaperState() {
   if (win === null || win.isDestroyed()) return
   setWallpaperBlurVar(blurOriginal)
   setCodeAlphaVar(codeOriginal)
+  setSidebarWallpaperLayer(win, sidebarOriginal === null ? null : wallpaperDataUrl(sidebarOriginal))
+    .catch((error) => log('sidebar restore failed:', String(error)))
   if (imageOriginal === null) {
     win.webContents.executeJavaScript(`(() => {
       const el = document.getElementById('dsh-wallpaper-layer')
@@ -643,9 +715,11 @@ function showWallpaperDialog() {
   codeOriginal = wallpaperCodeAlpha()
   imageOriginal = configuredWallpaper()
   imageDraft = imageOriginal
+  sidebarOriginal = configuredSidebarWallpaper()
+  sidebarDraft = sidebarOriginal
   const dlg = new BrowserWindow({
     width: 420,
-    height: 330,
+    height: 420,
     show: false,
     frame: false,
     // 同关闭对话框：不透明窗口（Windows 透明窗口有输入问题）
@@ -669,7 +743,7 @@ function showWallpaperDialog() {
   dlg.on('closed', () => {
     blurDialog = null
   })
-  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal))}`)
+  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal))}`)
 }
 
 // 滑块实时预览（模糊 + 代码块透明度）
@@ -719,6 +793,60 @@ ipcMain.on('dsh:wallpaper-clear-image', async () => {
   dlg.webContents.send('dsh:wallpaper-image-chosen', null)
 })
 
+// 对话框内选择侧栏独立壁纸：即时应用
+ipcMain.on('dsh:wallpaper-pick-sidebar-image', async (_event) => {
+  const win = mainWindow
+  const dlg = blurDialog
+  if (win === null || win.isDestroyed() || dlg === null || dlg.isDestroyed()) return
+  const result = await dialog.showOpenDialog(win, {
+    title: '选择侧栏壁纸图片',
+    properties: ['openFile'],
+    filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }],
+  })
+  if (result.canceled || result.filePaths.length === 0) return
+  const file = result.filePaths[0]
+  sidebarDraft = file
+  try {
+    await setSidebarWallpaperLayer(win, wallpaperDataUrl(file))
+    log(`sidebar wallpaper preview: ${file}`)
+  } catch (error) {
+    log('sidebar wallpaper preview failed:', String(error))
+  }
+  dlg.webContents.send('dsh:wallpaper-sidebar-image-chosen', file)
+})
+
+// 对话框内清除侧栏独立壁纸：回到共用主图
+ipcMain.on('dsh:wallpaper-clear-sidebar-image', async () => {
+  const win = mainWindow
+  const dlg = blurDialog
+  if (win === null || win.isDestroyed() || dlg === null || dlg.isDestroyed()) return
+  sidebarDraft = null
+  try {
+    await setSidebarWallpaperLayer(win, null)
+    log('sidebar wallpaper preview: cleared')
+  } catch (error) {
+    log('sidebar wallpaper clear preview failed:', String(error))
+  }
+  dlg.webContents.send('dsh:wallpaper-sidebar-image-chosen', null)
+})
+
+// 侧栏壁纸模式切换：共用主图 / 单独设置
+ipcMain.on('dsh:wallpaper-sidebar-mode', async (_event, mode) => {
+  const win = mainWindow
+  if (win === null || win.isDestroyed()) return
+  if (mode === 'shared') {
+    sidebarDraft = null
+    await setSidebarWallpaperLayer(win, null)
+      .catch((error) => log('sidebar mode shared failed:', String(error)))
+  } else {
+    sidebarDraft = sidebarOriginal
+    if (sidebarOriginal !== null) {
+      await setSidebarWallpaperLayer(win, wallpaperDataUrl(sidebarOriginal))
+        .catch((error) => log('sidebar mode separate failed:', String(error)))
+    }
+  }
+})
+
 // 确定/取消：ok=true 保存全部设置（滑块当前值 + 图片草稿）；否则还原
 ipcMain.on('dsh:wallpaper-commit', (_event, payload) => {
   if (payload?.ok) {
@@ -729,8 +857,10 @@ ipcMain.on('dsh:wallpaper-commit', (_event, payload) => {
     }
     if (imageDraft === null) cfg.wallpaper = undefined
     else cfg.wallpaper = imageDraft
+    if (sidebarDraft === null) cfg.sidebarWallpaper = undefined
+    else cfg.sidebarWallpaper = sidebarDraft
     saveConfig(cfg)
-    log(`wallpaper settings saved: blur=${cfg.wallpaperBlur ?? '?'}px codeAlpha=${cfg.wallpaperCodeAlpha ?? '?'} image=${imageDraft ?? '(none)'}`)
+    log(`wallpaper settings saved: blur=${cfg.wallpaperBlur ?? '?'}px codeAlpha=${cfg.wallpaperCodeAlpha ?? '?'} image=${imageDraft ?? '(none)'} sidebar=${sidebarDraft ?? '(shared)'}`)
   } else {
     restoreWallpaperState()
   }
@@ -811,6 +941,7 @@ function createWindow(url, wallpaper) {
     if (!win.webContents.getURL().startsWith(url)) return
     log(`page loaded: ${win.webContents.getURL()}`)
     if (wallpaper !== null) applyWallpaper(win, wallpaper)
+    applySidebarWallpaper(win)
     if (smoke) {
       const title = win.webContents.getTitle()
       console.log(`SMOKE_OK ${JSON.stringify({ title, url: win.webContents.getURL() })}`)
