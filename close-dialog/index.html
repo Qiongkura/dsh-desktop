@@ -4,11 +4,13 @@
 <meta charset="utf-8">
 <title>关闭确认</title>
 <style>
+  /* DeepSeek Harness 风格：暗色为默认，亮色跟随系统 prefers-color-scheme。
+     色值取自 DSH 设计令牌（bluish / deepseek / red 色阶）。 */
   :root {
     --bg-base: #151517;
+    --bg-hover: rgba(255, 255, 255, 0.08);
+    --bg-active: rgba(255, 255, 255, 0.14);
     --border-l2: rgba(255, 255, 255, 0.12);
-    --hover-bg: rgba(255, 255, 255, 0.08);
-    --active-bg: rgba(255, 255, 255, 0.14);
     --label-primary: #f9fafb;
     --label-secondary: #81858c;
     --label-tertiary: #6b6f76;
@@ -16,15 +18,37 @@
     --danger-border: rgba(242, 90, 90, 0.4);
     --danger-hover: rgba(242, 90, 90, 0.12);
     --danger-active: rgba(242, 90, 90, 0.2);
+    --primary-bg: #f9fafb;
+    --primary-bg-hover: #ebecf2;
+    --primary-bg-active: #e1e5ee;
+    --primary-text: #0f1115;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg-base: #ffffff;
+      --bg-hover: rgba(0, 0, 0, 0.06);
+      --bg-active: rgba(0, 0, 0, 0.1);
+      --border-l2: rgba(0, 0, 0, 0.12);
+      --label-primary: #0f1115;
+      --label-secondary: #61666b;
+      --label-tertiary: #9aa0a6;
+      --danger: #ec1313;
+      --danger-border: rgba(236, 19, 19, 0.35);
+      --danger-hover: rgba(236, 19, 19, 0.08);
+      --danger-active: rgba(236, 19, 19, 0.14);
+      --primary-bg: #0f1115;
+      --primary-bg-hover: #2a2d33;
+      --primary-bg-active: #3a3e46;
+      --primary-text: #ffffff;
+    }
   }
   * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
   html, body { height: 100%; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
       "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
-    background: transparent;
+    background: var(--bg-base);
     color: var(--label-primary);
-    padding: 12px;
     overflow: hidden;
   }
   .card {
@@ -32,19 +56,20 @@
     display: flex;
     flex-direction: column;
     background: var(--bg-base);
-    border: 1px solid var(--border-l2);
-    border-radius: 12px;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
-    overflow: hidden;
   }
   .head {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 16px 20px 0;
+    padding: 18px 20px 0;
     -webkit-app-region: drag;
   }
-  .head img { width: 26px; height: 26px; border-radius: 6px; -webkit-app-region: no-drag; }
+  .head img {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    -webkit-app-region: no-drag;
+  }
   .wordmark {
     font-size: 13px;
     line-height: 20px;
@@ -52,7 +77,7 @@
     letter-spacing: 0.08em;
     color: var(--label-secondary);
   }
-  .body { padding: 14px 20px 0; }
+  .body { padding: 16px 20px 0; }
   .title { font-size: 15px; line-height: 22px; font-weight: 600; }
   .desc { margin-top: 6px; font-size: 13px; line-height: 20px; color: var(--label-secondary); }
   .hint { margin-top: 10px; font-size: 12px; line-height: 18px; color: var(--label-tertiary); }
@@ -64,6 +89,7 @@
     align-items: center;
     gap: 10px;
     padding: 16px 20px 18px;
+    border-top: 1px solid var(--border-l2);
   }
   .btn {
     height: 34px;
@@ -80,14 +106,14 @@
   }
   .btn:focus-visible { outline: 2px solid rgba(86, 134, 254, 0.6); outline-offset: 1px; }
   .btn-ghost { border-color: var(--border-l2); }
-  .btn-ghost:hover { background: var(--hover-bg); }
-  .btn-ghost:active { background: var(--active-bg); }
+  .btn-ghost:hover { background: var(--bg-hover); }
+  .btn-ghost:active { background: var(--bg-active); }
   .btn-danger { color: var(--danger); border-color: var(--danger-border); }
   .btn-danger:hover { background: var(--danger-hover); }
   .btn-danger:active { background: var(--danger-active); }
-  .btn-primary { background: #f9fafb; color: #0f1115; font-weight: 600; }
-  .btn-primary:hover { background: #ebecf2; }
-  .btn-primary:active { background: #e1e5ee; }
+  .btn-primary { background: var(--primary-bg); color: var(--primary-text); font-weight: 600; }
+  .btn-primary:hover { background: var(--primary-bg-hover); }
+  .btn-primary:active { background: var(--primary-bg-active); }
 </style>
 </head>
 <body>
@@ -108,11 +134,13 @@
     </div>
   </div>
   <script>
-    // 图标由主进程通过 query 传入（base64 data URI，避免 file: 页面跨协议加载被拦）
-    const icon = new URLSearchParams(location.search).get('icon')
-    if (icon) document.getElementById('appIcon').src = icon
-
     const { dshCloseDialog } = window
+    // 图标经 preload/IPC 获取（base64 走 URL 查询串会被 '+' 解码损坏）
+    if (dshCloseDialog) {
+      dshCloseDialog.getIcon().then((uri) => {
+        if (uri) document.getElementById('appIcon').src = uri
+      })
+    }
     const choose = (action) => { if (dshCloseDialog) dshCloseDialog.choose(action) }
     document.getElementById('cancel').addEventListener('click', () => choose('cancel'))
     document.getElementById('quit').addEventListener('click', () => choose('quit'))

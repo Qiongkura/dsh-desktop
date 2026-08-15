@@ -322,12 +322,30 @@ function setWallpaperLayer(win, dataUrl) {
   })()`)
 }
 
-/** 页面加载后应用壁纸：面板毛玻璃 CSS + 壁纸层。 */
+/** 页面加载后应用壁纸：面板毛玻璃 CSS + 壁纸层 + 代码块半透明。 */
 function applyWallpaper(win, wallpaper) {
   injectWallpaperCss(win)
   const dataUrl = wallpaperDataUrl(wallpaper)
-  // 亮/暗主题自适应：把面板底色换成带透明度的版本；写入模糊值
+  // 亮/暗主题自适应：面板底色、模糊值、代码块底色；主题切换（body 样式变更）后自动重应用
   win.webContents.executeJavaScript(`(() => {
+    const resolveDark = () => (getComputedStyle(document.documentElement).colorScheme || 'light') === 'dark'
+    const applyCodeVars = () => {
+      const dark = resolveDark()
+      document.body.style.setProperty('--dsw-alias-markdown-code-block',
+        dark ? 'rgba(12,15,22,0.62)' : 'rgba(255,255,255,0.62)')
+      document.body.style.setProperty('--dsw-alias-markdown-code-block-banner',
+        dark ? 'rgba(20,24,34,0.55)' : 'rgba(250,251,252,0.6)')
+    }
+    applyCodeVars()
+    const observer = new MutationObserver(applyCodeVars)
+    observer.observe(document.body, { attributes: true, attributeFilter: ['style'] })
+    window.__dshWallpaperCleanup = () => {
+      observer.disconnect()
+      document.body.style.removeProperty('--dsw-alias-markdown-code-block')
+      document.body.style.removeProperty('--dsw-alias-markdown-code-block-banner')
+      document.documentElement.style.removeProperty('--dsh-wallpaper-panel')
+      document.documentElement.style.removeProperty('--dsh-wallpaper-blur')
+    }
     const scheme = getComputedStyle(document.documentElement).colorScheme || 'light'
     const dark = scheme === 'dark'
     document.documentElement.style.setProperty('--dsh-wallpaper-panel',
@@ -348,6 +366,7 @@ function applyWallpaper(win, wallpaper) {
         sideBlur: side ? getComputedStyle(side).backdropFilter : '(no side)',
         layer: layer ? layer.style.backgroundImage.slice(0, 30) : '(no layer)',
         blur: panel ? getComputedStyle(panel).backdropFilter : '(no panel)',
+        codeBg: document.body.style.getPropertyValue('--dsw-alias-markdown-code-block') || '(unset)',
       }
     }
     return JSON.stringify({ scheme, blur: ${wallpaperBlur()}, ...probe() })
@@ -388,6 +407,7 @@ async function clearWallpaper() {
     await win.webContents.executeJavaScript(`(() => {
       const el = document.getElementById('dsh-wallpaper-layer')
       if (el) el.style.display = 'none'
+      if (typeof window.__dshWallpaperCleanup === 'function') window.__dshWallpaperCleanup()
       return !!el
     })()`)
     if (wallpaperCssKey !== null) {
@@ -732,7 +752,9 @@ function askCloseAction() {
       height: 250,
       show: false,
       frame: false,
-      transparent: true,
+      // 注意：不要用 transparent: true —— Windows 上透明窗口会收不到真实鼠标
+      // 点击（按钮全部失效，只能任务管理器强杀），必须用不透明窗口。
+      backgroundColor: '#151517',
       resizable: false,
       minimizable: false,
       maximizable: false,
@@ -740,7 +762,6 @@ function askCloseAction() {
       skipTaskbar: true,
       parent: mainWindow,
       modal: true,
-      backgroundColor: '#00000000',
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
@@ -916,6 +937,44 @@ if (!gotLock) {
     buildMenu(runtime, url)
     createWindow(url, wallpaper)
     if (trayEnabled) createTray()
+
+    // ===== TEMP DIAG: 对话框诊断（验证后移除）=====
+    const diagShot = argvValue('--diag-close-dialog')
+    if (diagShot !== undefined) {
+      setTimeout(() => {
+        askCloseAction().then((action) => {
+          console.log(`DIAG_ACTION ${action}`)
+          appQuitting = true
+          app.quit()
+        })
+        const poll = setInterval(() => {
+          if (closeDialog !== null && !closeDialog.isDestroyed()) {
+            clearInterval(poll)
+            const stateTimer = setInterval(() => {
+              if (closeDialog === null || closeDialog.isDestroyed()) {
+                console.log('DIAG_DLG gone')
+                clearInterval(stateTimer)
+                return
+              }
+              console.log(`DIAG_DLG vis=${closeDialog.isVisible()} title=[${closeDialog.getTitle()}] url=${closeDialog.webContents.getURL()}`)
+            }, 2000)
+            setTimeout(async () => {
+              try {
+                const has = await closeDialog.webContents.executeJavaScript('typeof window.dshCloseDialog')
+                console.log(`DIAG_PRELOAD ${has}`)
+                const theme = await mainWindow.webContents.executeJavaScript(
+                  'JSON.stringify({ bg: getComputedStyle(document.body).backgroundColor, dark: matchMedia("(prefers-color-scheme: dark)").matches })')
+                console.log(`DIAG_THEME ${theme}`)
+                const img = await closeDialog.webContents.capturePage()
+                fs.writeFileSync(diagShot, img.toPNG())
+                console.log('DIAG_SHOT_SAVED')
+              } catch (error) { console.log(`DIAG_FAIL ${String(error)}`) }
+            }, 1000)
+          }
+        }, 200)
+      }, 2500)
+    }
+    // ===== TEMP DIAG END =====
   })
 
   app.on('window-all-closed', () => {
