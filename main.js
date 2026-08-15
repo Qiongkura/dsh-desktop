@@ -791,7 +791,7 @@ ipcMain.on('dsh:wallpaper-pick-image', async (_event) => {
   dlg.webContents.send('dsh:wallpaper-image-chosen', file)
 })
 
-// 对话框内清除图片：即时隐藏
+// 对话框内清除图片：即时移除壁纸变量（伪元素失去背景图即无壁纸）
 ipcMain.on('dsh:wallpaper-clear-image', async () => {
   const win = mainWindow
   const dlg = blurDialog
@@ -799,9 +799,8 @@ ipcMain.on('dsh:wallpaper-clear-image', async () => {
   imageDraft = null
   try {
     await win.webContents.executeJavaScript(`(() => {
-      const el = document.getElementById('dsh-wallpaper-layer')
-      if (el) el.style.display = 'none'
-      return !!el
+      document.body.style.removeProperty('--dsh-wallpaper-url')
+      return true
     })()`)
     log('wallpaper preview: cleared')
   } catch (error) {
@@ -959,7 +958,9 @@ function createWindow(url, wallpaper) {
     log(`page loaded: ${win.webContents.getURL()}`)
     // 页面重载后 insertCSS 的 key 失效，必须重置才能重新注入
     wallpaperCssKey = null
-    if (wallpaper !== null) applyWallpaper(win, wallpaper)
+    // 每次加载都重新读最新配置：对话框换图/清除后刷新，不能回退到启动时的旧图
+    const current = resolveWallpaper()
+    if (current !== null) applyWallpaper(win, current)
     applySidebarWallpaper(win)
     if (smoke) {
       const title = win.webContents.getTitle()
