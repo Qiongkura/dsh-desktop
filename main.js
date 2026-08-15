@@ -336,16 +336,14 @@ function injectWallpaperCss(win) {
       background-image: var(--dsh-wallpaper-url) !important;
       filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
     }
-    /* 左侧栏区域：更糊 1.6 倍（盖在 ::before 之上）。
-       共用主图时用 background-attachment: fixed —— 背景相对视口对齐，
-       侧栏显示的就是主图同一位置（一整张连续图，不出现第二份裁切）；
-       单独设置时 attachment 为 scroll，按侧栏区域裁切自己的图 */
+    /* 左侧栏区域：共用模式不渲染这层（主区壁纸本身就覆盖侧栏，再叠一层
+       会在右边缘产生模糊采样接缝）；只有单独设置侧栏独立图时才显示 */
     body::after {
       left: 0 !important;
       width: var(--dsh-sidebar-w, 280px) !important;
-      background-image: var(--dsh-wallpaper-url-sidebar, var(--dsh-wallpaper-url)) !important;
+      background-image: var(--dsh-wallpaper-url-sidebar, none) !important;
       background-attachment: var(--dsh-sidebar-attachment, fixed) !important;
-      /* 与主区同模糊度：共用主图时侧栏和主界面是一张连续图，无缝衔接 */
+      /* 与主区同模糊度 */
       filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
     }
     #root [data-slot='root'] > div,
