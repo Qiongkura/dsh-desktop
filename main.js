@@ -287,44 +287,6 @@ function wallpaperCodeAlpha() {
 /** 已注入的面板 CSS key（用于清除壁纸时移除）；壁纸层是 JS 创建的 div，可即时换图。 */
 let wallpaperCssKey = null
 
-/** 一体式标题栏：页面内容下移 40px，顶部留出标题栏条（拖拽区 + 原生窗口按钮）。 */
-let chromeCssKey = null
-
-function injectChromeCss(win) {
-  if (chromeCssKey !== null) return chromeCssKey
-  const css = `
-    #root [data-slot='root'] > div {
-      margin-top: 40px !important;
-      height: calc(100% - 40px) !important;
-    }`
-  chromeCssKey = win.webContents.insertCSS(css)
-  chromeCssKey.catch(() => { chromeCssKey = null })
-  return chromeCssKey
-}
-
-/** 创建顶部标题栏条（拖拽区）。z-index:-1：位于内容之下、壁纸之上，不遮挡弹窗。 */
-function setupTitleBar(win) {
-  return win.webContents.executeJavaScript(`(() => {
-    if (document.getElementById('dsh-titlebar')) return 'exists'
-    const bar = document.createElement('div')
-    bar.id = 'dsh-titlebar'
-    bar.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:40px;z-index:-1;-webkit-app-region:drag'
-    document.body.appendChild(bar)
-    // 主题变化（color-scheme）时通知主进程更新原生按钮配色
-    const report = () => {
-      const scheme = getComputedStyle(document.documentElement).colorScheme || 'light'
-      if (window.__dshChrome && typeof window.__dshChrome.reportScheme === 'function') {
-        window.__dshChrome.reportScheme(scheme)
-      }
-    }
-    report()
-    const mo = new MutationObserver(report)
-    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] })
-    window.__dshTitlebarObserver = mo
-    return 'created'
-  })()`).catch((error) => log('titlebar setup failed:', String(error)))
-}
-
 /** 注入面板半透明 CSS（幂等）。模糊由独立的毛玻璃层实现（backdrop-filter
  *  会创建 containing block，把 fixed 弹窗困在面板内——因此面板本身不背模糊）。 */
 function injectWallpaperCss(win) {
@@ -704,7 +666,6 @@ function showWallpaperDialog() {
     fullscreenable: false,
     skipTaskbar: true,
     parent: mainWindow,
-    modal: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -787,23 +748,6 @@ ipcMain.on('dsh:wallpaper-commit', (_event, payload) => {
   if (dlg !== null && !dlg.isDestroyed()) dlg.close()
 })
 
-// 主题配色 → 原生标题栏按钮颜色
-ipcMain.on('dsh:chrome-scheme', (_event, scheme) => {
-  const dark = scheme === 'dark'
-  const win = mainWindow
-  if (win === null || win.isDestroyed()) return
-  try {
-    win.setTitleBarOverlay({
-      color: dark ? '#101318' : '#ffffff',
-      symbolColor: dark ? '#e5e5ea' : '#3c3c43',
-      height: 40,
-    })
-    log(`titlebar overlay scheme=${scheme}`)
-  } catch (error) {
-    log('titlebar overlay update failed:', String(error))
-  }
-})
-
 // ---------------------------------------------------------------- 窗口 ----
 
 let mainWindow = null
@@ -817,15 +761,10 @@ function createWindow(url, wallpaper) {
     show: false,
     backgroundColor: '#101318',
     icon: iconPath(),
-    // 一体式标题栏：去掉原生标题栏，页面延伸到顶部；窗口控制按钮浮在内容上
-    titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#101318', symbolColor: '#e5e5ea', height: 40 },
-    autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      preload: path.join(__dirname, 'chrome-preload.js'),
     },
   })
 
@@ -881,8 +820,6 @@ function createWindow(url, wallpaper) {
     // 启动画面（file:// 壁纸页）不算 GUI 加载完成
     if (!win.webContents.getURL().startsWith(url)) return
     log(`page loaded: ${win.webContents.getURL()}`)
-    injectChromeCss(win)
-    setupTitleBar(win)
     if (wallpaper !== null) applyWallpaper(win, wallpaper)
     if (smoke) {
       const title = win.webContents.getTitle()
