@@ -9,7 +9,7 @@
 - 否则启动内置后端（内置 node.exe + `@deepseek-ai/dsh` 的 `lib/bin.js`），就绪后打开窗口；
 - 关闭窗口自动回收后端进程；支持单实例、系统浏览器打开外链、菜单栏快捷操作；
 - 内置模式把 DSH_HOME 隔离到应用数据目录（`%APPDATA%\DeepSeek Harness Desktop\home`），不干扰本机已有安装；
-- 可打包为绿色单文件 exe（portable）或安装包（NSIS）。
+- 可打包为绿色单文件 exe（portable）或解压即用的 ZIP 包。
 
 ## 工作原理
 
