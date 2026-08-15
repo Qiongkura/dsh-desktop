@@ -382,6 +382,9 @@ function applyWallpaper(win, wallpaper) {
         isDark ? 'rgba(12,15,22,' + alpha + ')' : 'rgba(255,255,255,' + alpha + ')')
       document.body.style.setProperty('--dsw-alias-markdown-code-block-banner',
         isDark ? 'rgba(20,24,34,' + alpha + ')' : 'rgba(250,251,252,' + alpha + ')')
+      // 行内代码灰底（聊天里反引号文字的浅灰背景）也跟随滑杆透明度
+      document.body.style.setProperty('--dsw-alias-markdown-inline-code',
+        isDark ? 'rgba(35,38,43,' + alpha + ')' : 'rgba(239,240,243,' + alpha + ')')
       // 侧栏滚动渐隐终点色：透明，消除设置键上方的白色渐变带
       document.body.style.setProperty('--dsw-specific-sidebar-fill', 'transparent')
     }
@@ -392,6 +395,7 @@ function applyWallpaper(win, wallpaper) {
       document.body.style.removeProperty('--dsh-sidebar-w')
       document.body.style.removeProperty('--dsw-alias-markdown-code-block')
       document.body.style.removeProperty('--dsw-alias-markdown-code-block-banner')
+      document.body.style.removeProperty('--dsw-alias-markdown-inline-code')
       document.body.style.removeProperty('--dsw-specific-sidebar-fill')
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel')
       document.documentElement.style.removeProperty('--dsh-wallpaper-blur')
