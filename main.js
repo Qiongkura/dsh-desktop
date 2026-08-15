@@ -316,45 +316,51 @@ function injectWallpaperCss(win) {
   return wallpaperCssKey
 }
 
-/** 在页面里创建/更新壁纸层（z-index:-2）与两个毛玻璃层（z-index:-1，侧栏 1.6 倍模糊）。 */
+/** 在页面里创建/更新壁纸层与两个模糊副本层。
+ *  安全设计（绝不影响交互）：
+ *  - 所有层都是 body 的直接子元素、z-index 为负、pointer-events:none；
+ *  - 模糊层 blur 的是**自己的背景副本**（filter: blur，一次性渲染），
+ *    不是 backdrop-filter（不采样页面、不创建 containing block、不逐帧重算）；
+ *  - 页面内容（#root）始终绘制在它们之上。 */
 function setWallpaperLayer(win, dataUrl) {
   return win.webContents.executeJavaScript(`(() => {
-    let el = document.getElementById('dsh-wallpaper-layer')
-    if (!el) {
-      el = document.createElement('div')
-      el.id = 'dsh-wallpaper-layer'
-      el.style.cssText = 'position:fixed;inset:0;z-index:-2;pointer-events:none;background-position:center;background-size:cover;background-repeat:no-repeat;background-attachment:fixed'
-      document.body.appendChild(el)
-    }
-    el.style.backgroundImage = "url('${dataUrl}')"
-    el.style.display = 'block'
-    // 毛玻璃层：覆盖侧栏 / 中间列，不设面板上以免困住 fixed 弹窗
-    const blurCss = (id, blur) => 'position:fixed;left:0;top:0;height:100vh;z-index:-1;pointer-events:none;backdrop-filter:' + blur + ';-webkit-backdrop-filter:' + blur
-    let side = document.getElementById('dsh-wallpaper-blur-side')
-    let main = document.getElementById('dsh-wallpaper-blur-main')
-    if (!side || !main) {
-      if (!side) { side = document.createElement('div'); side.id = 'dsh-wallpaper-blur-side'; side.style.cssText = blurCss('side', 'blur(calc(var(--dsh-wallpaper-blur, 18px) * 1.6))'); document.body.appendChild(side) }
-      if (!main) { main = document.createElement('div'); main.id = 'dsh-wallpaper-blur-main'; main.style.cssText = blurCss('main', 'blur(var(--dsh-wallpaper-blur, 18px))'); document.body.appendChild(main) }
-      const frame = document.querySelector('#root [data-slot="root"] > div')
-      const sync = () => {
-        if (!frame) return
-        const rect = frame.getBoundingClientRect()
-        const first = frame.children[0]
-        const w1 = first ? first.getBoundingClientRect().width : 280
-        side.style.left = rect.left + 'px'
-        side.style.top = rect.top + 'px'
-        side.style.width = w1 + 'px'
-        side.style.height = rect.height + 'px'
-        main.style.left = (rect.left + w1) + 'px'
-        main.style.top = rect.top + 'px'
-        main.style.width = Math.max(0, rect.width - w1) + 'px'
-        main.style.height = rect.height + 'px'
+    const mk = (id, z, blurExpr) => {
+      let d = document.getElementById(id)
+      if (!d) {
+        d = document.createElement('div')
+        d.id = id
+        d.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100vh;z-index:' + z + ';pointer-events:none;background-position:center;background-size:cover;background-repeat:no-repeat'
+        if (blurExpr) d.style.filter = 'blur(' + blurExpr + ')'
+        document.body.appendChild(d)
       }
-      sync()
-      new ResizeObserver(sync).observe(frame)
+      d.style.backgroundImage = "url('${dataUrl}')"
+      d.style.display = 'block'
+      return d
+    }
+    const wall = mk('dsh-wallpaper-layer', -2, null)
+    const side = mk('dsh-wallpaper-blur-side', -1, 'calc(var(--dsh-wallpaper-blur, 18px) * 1.6)')
+    const main = mk('dsh-wallpaper-blur-main', -1, 'var(--dsh-wallpaper-blur, 18px)')
+    const frame = document.querySelector('#root [data-slot="root"] > div')
+    const sync = () => {
+      if (!frame) return
+      const rect = frame.getBoundingClientRect()
+      const first = frame.children[0]
+      const w1 = first ? first.getBoundingClientRect().width : 280
+      side.style.left = rect.left + 'px'
+      side.style.top = rect.top + 'px'
+      side.style.width = w1 + 'px'
+      side.style.height = rect.height + 'px'
+      main.style.left = (rect.left + w1) + 'px'
+      main.style.top = rect.top + 'px'
+      main.style.width = Math.max(0, rect.width - w1) + 'px'
+      main.style.height = rect.height + 'px'
+    }
+    sync()
+    if (!window.__dshWallpaperBlurSync) {
+      if (frame) new ResizeObserver(sync).observe(frame)
       window.__dshWallpaperBlurSync = sync
     }
-    return el.style.backgroundImage.slice(0, 40)
+    return wall.style.backgroundImage.slice(0, 40)
   })()`)
 }
 
@@ -847,12 +853,10 @@ function createWindow(url, wallpaper) {
     }
   })
 
-  if (wallpaper !== null) showSplash(win, wallpaper)
   win.loadURL(url)
   mainWindow = win
   return win
 }
-
 // ---------------------------------------------------------------- 托盘 ----
 
 let tray = null
