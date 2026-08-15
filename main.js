@@ -383,11 +383,12 @@ function injectWallpaperCss(win) {
     }
     /* 侧栏底部：把原 24px 主题渐隐层改为壁纸遮挡层——
        会话列表滚到底部时，文字在顶部 32px 渐变区渐隐，
-       下方被不透明壁纸盖住（与输入框同款遮挡+渐变） */
+       下方被不透明壁纸盖住（与输入框同款遮挡+渐变）。
+       侧栏不透明时 --dsh-sidebar-fade-url=none 撤销这层 */
     #root [data-slot='root'] > div > div:first-child [class$='treeBody'] [class$='fade'] {
       height: 72px !important;
       pointer-events: none !important;
-      background-image: var(--dsh-wallpaper-url-sidebar, var(--dsh-wallpaper-url)) !important;
+      background-image: var(--dsh-sidebar-fade-url, var(--dsh-wallpaper-url-sidebar, var(--dsh-wallpaper-url))) !important;
       background-position: center !important;
       background-size: cover !important;
       background-repeat: no-repeat !important;
@@ -467,20 +468,22 @@ function applyWallpaper(win, wallpaper) {
     const scheme = getComputedStyle(document.documentElement).colorScheme || 'light'
     const dark = scheme === 'dark'
     window.__dshWallpaperTransparent = ${JSON.stringify(transparentFlags())}
-    document.documentElement.style.setProperty('--dsh-wallpaper-blur', '${wallpaperBlur()}px')
-    document.documentElement.style.setProperty('--dsh-wallpaper-code-alpha', '${wallpaperCodeAlpha()}')
+    document.body.style.setProperty('--dsh-wallpaper-blur', '${wallpaperBlur()}px')
+    document.body.style.setProperty('--dsh-wallpaper-code-alpha', '${wallpaperCodeAlpha()}')
     const applyVars = () => {
       const isDark = document.body.hasAttribute('data-ds-dark-theme')
         || (getComputedStyle(document.documentElement).colorScheme || 'light') === 'dark'
       const T = window.__dshWallpaperTransparent || { newSession: true, input: true, sidebar: true, main: true }
-      const a = parseFloat(document.documentElement.style.getPropertyValue('--dsh-wallpaper-code-alpha'))
+      const a = parseFloat(document.body.style.getPropertyValue('--dsh-wallpaper-code-alpha'))
       const alpha = Number.isFinite(a) ? Math.max(0.08, Math.min(1, a)) : 0.45
       const panelColor = isDark ? 'rgba(12,15,22,0.58)' : 'rgba(255,255,255,0.55)'
+      // 以下变量必须设在 body 上：值里引用 var(--dsw-alias-bg-base) 等主题变量，
+      // 主题变量定义在 body，设在 html 上会解析失败导致开关失效（回退半透明）
       // 主界面面板：透明=半透明面板色；不透明=主题基底色
-      document.documentElement.style.setProperty('--dsh-wallpaper-panel',
+      document.body.style.setProperty('--dsh-wallpaper-panel',
         T.main ? panelColor : 'var(--dsw-alias-bg-base)')
       // 侧栏面板：独立开关
-      document.documentElement.style.setProperty('--dsh-wallpaper-panel-sidebar',
+      document.body.style.setProperty('--dsh-wallpaper-panel-sidebar',
         T.sidebar ? panelColor
           : (isDark ? 'var(--dsw-static-neutral-bluish-900)' : 'var(--dsw-static-neutral-bluish-50)'))
       // 面板前景（标题栏文字/边框/悬停）：跟随外观明暗，与面板色同源
@@ -495,11 +498,14 @@ function applyWallpaper(win, wallpaper) {
         T.input ? 'transparent'
           : (isDark ? 'var(--dsw-static-neutral-bluish-850)' : 'var(--dsw-static-neutral-bluish-00)'))
       // 侧栏"新对话"按钮
-      document.documentElement.style.setProperty('--dsh-t-new-session',
+      document.body.style.setProperty('--dsh-t-new-session',
         T.newSession ? 'transparent' : 'var(--dsw-alias-button-elevated-fill)')
       // 输入框下方的壁纸遮罩（盖住滚动文字）：主界面不透明时撤销
-      if (T.main) document.documentElement.style.removeProperty('--dsh-t-composer-mask-url')
-      else document.documentElement.style.setProperty('--dsh-t-composer-mask-url', 'none')
+      if (T.main) document.body.style.removeProperty('--dsh-t-composer-mask-url')
+      else document.body.style.setProperty('--dsh-t-composer-mask-url', 'none')
+      // 侧栏底部壁纸遮挡层：侧栏不透明时撤销
+      if (T.sidebar) document.body.style.removeProperty('--dsh-sidebar-fade-url')
+      else document.body.style.setProperty('--dsh-sidebar-fade-url', 'none')
       // 侧栏滚动渐隐终点色：保持透明（让背景透出），不随开关恢复
       document.body.style.setProperty('--dsw-specific-sidebar-fill', 'transparent')
       // 代码块/行内代码透明度
@@ -520,15 +526,16 @@ function applyWallpaper(win, wallpaper) {
       document.body.style.removeProperty('--dsw-alias-markdown-inline-code')
       document.body.style.removeProperty('--dsw-specific-sidebar-fill')
       document.body.style.removeProperty('--dsw-specific-input-major')
-      document.documentElement.style.removeProperty('--dsh-wallpaper-panel')
-      document.documentElement.style.removeProperty('--dsh-wallpaper-panel-sidebar')
+      document.body.style.removeProperty('--dsh-wallpaper-panel')
+      document.body.style.removeProperty('--dsh-wallpaper-panel-sidebar')
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel-fg')
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel-border')
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel-hover')
-      document.documentElement.style.removeProperty('--dsh-wallpaper-blur')
-      document.documentElement.style.removeProperty('--dsh-wallpaper-code-alpha')
-      document.documentElement.style.removeProperty('--dsh-t-new-session')
-      document.documentElement.style.removeProperty('--dsh-t-composer-mask-url')
+      document.body.style.removeProperty('--dsh-wallpaper-blur')
+      document.body.style.removeProperty('--dsh-wallpaper-code-alpha')
+      document.body.style.removeProperty('--dsh-t-new-session')
+      document.body.style.removeProperty('--dsh-t-composer-mask-url')
+      document.body.style.removeProperty('--dsh-sidebar-fade-url')
     }
     return JSON.stringify({ scheme, blur: ${wallpaperBlur()}, codeAlpha: ${wallpaperCodeAlpha()}, transparent: ${JSON.stringify(transparentFlags())} })
   })()`).then((state) => {
@@ -587,7 +594,7 @@ function setWallpaperBlurVar(value) {
   if (win === null || win.isDestroyed()) return
   const v = Math.max(0, Math.min(100, Number(value) || 0))
   win.webContents.executeJavaScript(
-    `document.documentElement.style.setProperty('--dsh-wallpaper-blur', '${v}px')`,
+    `document.body.style.setProperty('--dsh-wallpaper-blur', '${v}px')`,
   ).catch(() => {})
 }
 
@@ -597,7 +604,7 @@ function setCodeAlphaVar(value) {
   if (win === null || win.isDestroyed()) return
   const a = Math.max(0.08, Math.min(1, Number(value) || 0.45))
   win.webContents.executeJavaScript(
-    `document.documentElement.style.setProperty('--dsh-wallpaper-code-alpha', '${a}');
+    `document.body.style.setProperty('--dsh-wallpaper-code-alpha', '${a}');
      if (typeof window.__dshApplyWallpaperVars === 'function') window.__dshApplyWallpaperVars()`,
   ).catch(() => {})
 }
