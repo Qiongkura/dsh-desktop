@@ -272,51 +272,92 @@ function showSplash(win, wallpaper) {
   } catch { /* 壁纸失败不阻塞启动 */ }
 }
 
-/** 页面加载后注入壁纸 CSS：壁纸图层 + 框架透明 + 面板毛玻璃。 */
-function applyWallpaper(win, wallpaper) {
-  const dataUrl = wallpaperDataUrl(wallpaper)
+/** 当前壁纸模糊值（px），来自配置，默认 18。 */
+function wallpaperBlur() {
+  const n = Number(loadConfig().wallpaperBlur)
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : 18
+}
+
+/** 已注入的面板 CSS key（用于清除壁纸时移除）；壁纸层是 JS 创建的 div，可即时换图。 */
+let wallpaperCssKey = null
+
+/** 注入面板毛玻璃 CSS（幂等）。返回注入 key。 */
+function injectWallpaperCss(win) {
+  if (wallpaperCssKey !== null) return wallpaperCssKey
   const css = `
     html { background: transparent !important; }
     body { background: transparent !important; }
-    body::before {
-      content: '' !important; position: fixed !important; inset: 0 !important;
-      z-index: -1 !important; pointer-events: none !important;
-      background: url('${dataUrl}') center / cover no-repeat fixed !important;
-    }
-    #root [data-slot='root'] > div { background: transparent !important; }
-    #root [data-slot='root'] > div > div > [data-slot] > div {
+    #root [data-slot='root'] > div,
+    #root [data-slot='root'] > div > div { background: transparent !important; }
+    /* 中间/右侧面板：标准模糊 */
+    #root [data-slot='root'] > div > div:not(:first-child) > [data-slot] > div {
       background: var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) !important;
-      backdrop-filter: blur(18px) !important;
-      -webkit-backdrop-filter: blur(18px) !important;
+      backdrop-filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
+      -webkit-backdrop-filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
+    }
+    /* 左侧栏：同样透出壁纸，但模糊 1.6 倍，更糊 */
+    #root [data-slot='root'] > div > div:first-child > [data-slot] > div {
+      background: var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) !important;
+      backdrop-filter: blur(calc(var(--dsh-wallpaper-blur, 18px) * 1.6)) !important;
+      -webkit-backdrop-filter: blur(calc(var(--dsh-wallpaper-blur, 18px) * 1.6)) !important;
     }`
-  win.webContents.insertCSS(css).catch(() => {})
-  // 亮/暗主题自适应：把面板底色换成带透明度的版本
+  wallpaperCssKey = win.webContents.insertCSS(css)
+  wallpaperCssKey.catch(() => { wallpaperCssKey = null })
+  return wallpaperCssKey
+}
+
+/** 在页面里创建/更新壁纸层 div（#dsh-wallpaper-layer），即时生效，无需刷新。 */
+function setWallpaperLayer(win, dataUrl) {
+  return win.webContents.executeJavaScript(`(() => {
+    let el = document.getElementById('dsh-wallpaper-layer')
+    if (!el) {
+      el = document.createElement('div')
+      el.id = 'dsh-wallpaper-layer'
+      el.style.cssText = 'position:fixed;inset:0;z-index:-1;pointer-events:none;background-position:center;background-size:cover;background-repeat:no-repeat;background-attachment:fixed'
+      document.body.appendChild(el)
+    }
+    el.style.backgroundImage = "url('${dataUrl}')"
+    el.style.display = 'block'
+    return el.style.backgroundImage.slice(0, 40)
+  })()`)
+}
+
+/** 页面加载后应用壁纸：面板毛玻璃 CSS + 壁纸层。 */
+function applyWallpaper(win, wallpaper) {
+  injectWallpaperCss(win)
+  const dataUrl = wallpaperDataUrl(wallpaper)
+  // 亮/暗主题自适应：把面板底色换成带透明度的版本；写入模糊值
   win.webContents.executeJavaScript(`(() => {
     const scheme = getComputedStyle(document.documentElement).colorScheme || 'light'
     const dark = scheme === 'dark'
     document.documentElement.style.setProperty('--dsh-wallpaper-panel',
       dark ? 'rgba(12,15,22,0.58)' : 'rgba(255,255,255,0.55)')
+    document.documentElement.style.setProperty('--dsh-wallpaper-blur', '${wallpaperBlur()}px')
     const probe = () => {
       const frame = document.querySelector('#root [data-slot="root"] > div')
       const slot = document.querySelector('#root [data-slot="root"] > div > div > [data-slot]')
       const panel = slot ? slot.querySelector(':scope > div') : null
-      const before = getComputedStyle(document.body, '::before')
+      const side = document.querySelector('#root [data-slot="root"] > div > div:first-child > [data-slot] > div')
+      const layer = document.getElementById('dsh-wallpaper-layer')
       return {
         bodyBg: getComputedStyle(document.body).backgroundColor,
         frameBg: frame ? getComputedStyle(frame).backgroundColor : '(no frame)',
+        colBg: frame && frame.children[0] ? getComputedStyle(frame.children[0]).backgroundColor : '(no col)',
         slot: slot ? slot.getAttribute('data-slot') : '(no slot)',
         panelBg: panel ? getComputedStyle(panel).backgroundColor : '(no panel)',
-        layer: before.backgroundImage.slice(0, 30),
+        sideBlur: side ? getComputedStyle(side).backdropFilter : '(no side)',
+        layer: layer ? layer.style.backgroundImage.slice(0, 30) : '(no layer)',
         blur: panel ? getComputedStyle(panel).backdropFilter : '(no panel)',
       }
     }
-    return JSON.stringify({ scheme, ...probe() })
+    return JSON.stringify({ scheme, blur: ${wallpaperBlur()}, ...probe() })
   })()`).then((state) => {
     log(`wallpaper applied: ${state}`)
   }).catch((error) => log('wallpaper scheme detection failed:', String(error)))
+  setWallpaperLayer(win, dataUrl).catch((error) => log('wallpaper layer failed:', String(error)))
 }
 
-/** 文件菜单：选择壁纸图片并立即生效。 */
+/** 文件菜单：选择壁纸图片，立即生效（不重载页面）。 */
 async function pickWallpaper() {
   const win = mainWindow
   if (win === null || win.isDestroyed()) return
@@ -329,16 +370,189 @@ async function pickWallpaper() {
   const file = result.filePaths[0]
   saveConfig({ wallpaper: file })
   log(`wallpaper set: ${file}`)
-  win.webContents.reload()
+  try {
+    await setWallpaperLayer(win, wallpaperDataUrl(file))
+    log('wallpaper updated live')
+  } catch (error) {
+    log('wallpaper live update failed:', String(error))
+  }
 }
 
-/** 文件菜单：清除壁纸。 */
-function clearWallpaper() {
+/** 文件菜单：清除壁纸，立即生效（不重载页面）。 */
+async function clearWallpaper() {
   saveConfig({ wallpaper: undefined })
   log('wallpaper cleared')
   const win = mainWindow
-  if (win !== null && !win.isDestroyed()) win.webContents.reload()
+  if (win === null || win.isDestroyed()) return
+  try {
+    await win.webContents.executeJavaScript(`(() => {
+      const el = document.getElementById('dsh-wallpaper-layer')
+      if (el) el.style.display = 'none'
+      return !!el
+    })()`)
+    if (wallpaperCssKey !== null) {
+      win.webContents.removeInsertedCSS(wallpaperCssKey).catch(() => {})
+      wallpaperCssKey = null
+    }
+    log('wallpaper removed live')
+  } catch (error) {
+    log('wallpaper clear failed:', String(error))
+  }
 }
+
+// ----------------------------------------------------------- 壁纸模糊调节 ----
+
+let blurDialog = null
+let blurOriginal = 18
+
+/** 把模糊值写到主窗口的 CSS 变量（实时预览用）。 */
+function setWallpaperBlurVar(value) {
+  const win = mainWindow
+  if (win === null || win.isDestroyed()) return
+  const v = Math.max(0, Math.min(100, Number(value) || 0))
+  win.webContents.executeJavaScript(
+    `document.documentElement.style.setProperty('--dsh-wallpaper-blur', '${v}px')`,
+  ).catch(() => {})
+}
+
+/** 构建模糊调节对话框的 HTML（DSH 暗色风格，与关闭对话框一致）。 */
+function buildWallpaperDialogHtml(current) {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>壁纸模糊</title>
+<style>
+  :root {
+    --bg-base: #151517; --border-l2: rgba(255,255,255,0.12);
+    --hover-bg: rgba(255,255,255,0.08); --label-primary: #f9fafb;
+    --label-secondary: #81858c; --label-tertiary: #6b6f76; --accent: #4d6bfe;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    background: transparent; color: var(--label-primary); padding: 12px; overflow: hidden;
+  }
+  .card {
+    height: 100%; display: flex; flex-direction: column;
+    background: var(--bg-base); border: 1px solid var(--border-l2);
+    border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.3);
+    overflow: hidden;
+  }
+  .body { padding: 18px 20px 0; }
+  .title { font-size: 14px; line-height: 20px; font-weight: 600; }
+  .desc { margin-top: 4px; font-size: 12px; line-height: 18px; color: var(--label-secondary); }
+  .row { display: flex; align-items: center; gap: 12px; margin-top: 18px; }
+  input[type=range] { flex: 1; accent-color: var(--accent); height: 4px; }
+  .val { min-width: 44px; text-align: right; font-size: 13px; color: var(--label-primary);
+         font-variant-numeric: tabular-nums; }
+  .footer { margin-top: auto; display: flex; justify-content: flex-end; align-items: center;
+            gap: 10px; padding: 16px 20px 18px; }
+  .btn {
+    height: 32px; padding: 0 16px; border-radius: 16px; border: 1px solid transparent;
+    background: transparent; color: var(--label-primary); font-size: 12px; font-weight: 500;
+    font-family: inherit; cursor: pointer; transition: background-color .12s ease, border-color .12s ease;
+  }
+  .btn:focus-visible { outline: 2px solid rgba(86,134,254,.6); outline-offset: 1px; }
+  .btn-ghost { border-color: var(--border-l2); }
+  .btn-ghost:hover { background: var(--hover-bg); }
+  .btn-primary { background: #f9fafb; color: #0f1115; font-weight: 600; }
+  .btn-primary:hover { background: #ebecf2; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="body">
+      <div class="title">壁纸模糊程度</div>
+      <div class="desc">数值越大越模糊；左侧栏固定比中间更模糊 1.6 倍。</div>
+      <div class="row">
+        <input type="range" id="slider" min="0" max="64" step="1" value="${current}">
+        <span class="val" id="val">${current}px</span>
+      </div>
+    </div>
+    <div class="footer">
+      <button class="btn btn-ghost" id="reset">恢复默认</button>
+      <button class="btn btn-ghost" id="cancel">取消</button>
+      <button class="btn btn-primary" id="ok">确定</button>
+    </div>
+  </div>
+  <script>
+    const { dshWallpaperDialog } = window
+    const slider = document.getElementById('slider')
+    const val = document.getElementById('val')
+    const apply = (v) => { val.textContent = v + 'px'; dshWallpaperDialog.preview(v) }
+    slider.addEventListener('input', () => apply(Number(slider.value)))
+    document.getElementById('reset').addEventListener('click', () => { slider.value = 18; apply(18) })
+    document.getElementById('cancel').addEventListener('click', () => dshWallpaperDialog.commit(Number(slider.value), false))
+    document.getElementById('ok').addEventListener('click', () => dshWallpaperDialog.commit(Number(slider.value), true))
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') dshWallpaperDialog.commit(Number(slider.value), false)
+      else if (event.key === 'Enter') dshWallpaperDialog.commit(Number(slider.value), true)
+    })
+    apply(Number(slider.value))
+  </script>
+</body>
+</html>`
+}
+
+/** 文件菜单：打开壁纸模糊调节对话框。 */
+function showWallpaperDialog() {
+  if (blurDialog !== null && !blurDialog.isDestroyed()) {
+    blurDialog.focus()
+    return
+  }
+  blurOriginal = wallpaperBlur()
+  const dlg = new BrowserWindow({
+    width: 380,
+    height: 210,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    parent: mainWindow,
+    modal: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, 'wallpaper-dialog', 'preload.js'),
+    },
+  })
+  blurDialog = dlg
+  dlg.setMenu(null)
+  dlg.once('ready-to-show', () => dlg.show())
+  dlg.on('closed', () => {
+    blurDialog = null
+    // 未确定即关闭：还原
+    setWallpaperBlurVar(blurOriginal)
+  })
+  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal))}`)
+}
+
+// 滑块实时预览
+ipcMain.on('dsh:wallpaper-blur-preview', (_event, value) => {
+  setWallpaperBlurVar(value)
+})
+
+// 确定/取消：ok=true 保存配置；否则还原
+ipcMain.on('dsh:wallpaper-blur-commit', (_event, payload) => {
+  const value = Math.max(0, Math.min(100, Number(payload?.value) || 0))
+  if (payload?.ok) {
+    saveConfig({ wallpaperBlur: value })
+    log(`wallpaper blur set: ${value}px`)
+  } else {
+    setWallpaperBlurVar(blurOriginal)
+  }
+  const dlg = blurDialog
+  if (dlg !== null && !dlg.isDestroyed()) dlg.close()
+})
 
 // ---------------------------------------------------------------- 窗口 ----
 

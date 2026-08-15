@@ -27,6 +27,7 @@
     "files": [
       "main.js",
       "close-dialog/*",
+      "wallpaper-dialog/*",
       "package.json",
       "README.md"
     ],
