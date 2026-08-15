@@ -115,12 +115,23 @@ function Stage-Runtime {
   Write-Host "[build] runtime staged: $runtimeDir ($sizeMB MB)"
 }
 
+function Ensure-BundledNode {
+  $nodeExe = Join-Path $root 'build\node.exe'
+  if (-not (Test-Path $nodeExe)) {
+    $src = (Get-Command node -ErrorAction SilentlyContinue).Source
+    if (-not $src) { throw 'node.exe not found on PATH; cannot bundle' }
+    Copy-Item $src $nodeExe -Force
+    Write-Host '[build] copied node.exe into build/'
+  }
+}
+
 # ---- main ----
 $wrapperInstalled = $false
 $serverProc = $null
 try {
   Render-Icons
   Stage-Runtime
+  Ensure-BundledNode
   if (-not (Test-SymlinkPrivilege)) {
     Install-7zaWrapper
     $wrapperInstalled = $true
