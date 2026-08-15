@@ -352,9 +352,24 @@ function injectWallpaperCss(win) {
     #root [data-slot='root'] > div > div > [data-slot] > div {
       background: var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) !important;
     }
-    /* 输入框区域：彻底透明，让壁纸直接透出（原渐变白带一并消失） */
+    /* 输入框区域：座位本身透明；::before 铺一层与主区视口对齐的壁纸
+       （不透明），滚到输入框下方的聊天文字被完全盖住不显示，
+       壁纸保持连续；伪元素滤镜只模糊自身，不影响输入内容 */
     #root [class*='composerSeat'] {
       background: transparent !important;
+    }
+    #root [class*='composerSeat']::before {
+      content: '' !important;
+      position: absolute !important;
+      inset: 0 !important;
+      z-index: -1 !important;
+      pointer-events: none !important;
+      background-image: var(--dsh-wallpaper-url) !important;
+      background-position: center !important;
+      background-size: cover !important;
+      background-repeat: no-repeat !important;
+      background-attachment: fixed !important;
+      filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
     }`
   wallpaperCssKey = win.webContents.insertCSS(css)
   wallpaperCssKey.catch(() => { wallpaperCssKey = null })
@@ -429,6 +444,8 @@ function applyWallpaper(win, wallpaper) {
         isDark ? 'rgba(35,38,43,' + alpha + ')' : 'rgba(239,240,243,' + alpha + ')')
       // 侧栏滚动渐隐终点色：透明，消除设置键上方的白色渐变带
       document.body.style.setProperty('--dsw-specific-sidebar-fill', 'transparent')
+      // 文字输入框（含"新会话"英雄卡片）：透明，让壁纸透出
+      document.body.style.setProperty('--dsw-specific-input-major', 'transparent')
     }
     applyVars()
     window.__dshApplyWallpaperVars = applyVars
@@ -439,6 +456,7 @@ function applyWallpaper(win, wallpaper) {
       document.body.style.removeProperty('--dsw-alias-markdown-code-block-banner')
       document.body.style.removeProperty('--dsw-alias-markdown-inline-code')
       document.body.style.removeProperty('--dsw-specific-sidebar-fill')
+      document.body.style.removeProperty('--dsw-specific-input-major')
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel')
       document.documentElement.style.removeProperty('--dsh-wallpaper-blur')
       document.documentElement.style.removeProperty('--dsh-wallpaper-code-alpha')
