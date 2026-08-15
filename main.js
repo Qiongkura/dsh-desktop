@@ -244,7 +244,8 @@ function resolveWallpaper() {
 
 /** 把壁纸图片转成 data: URL（http 页面不能加载 file:// 资源）。
  *  大图（手机原图可达数十 MB）会拖死渲染器（解码 + 全屏毛玻璃逐帧重采样），
- *  因此用 nativeImage 缩放到最长边 1920px 后再编码。 */
+ *  因此用 nativeImage 缩放到最长边 3840px 后再编码（4K 屏满清晰度；
+ *  之前的 1920px 在 4K 屏上被拉伸 2 倍导致看起来模糊）。 */
 function wallpaperDataUrl(file) {
   const ext = path.extname(file).toLowerCase()
   const mime = {
@@ -255,9 +256,9 @@ function wallpaperDataUrl(file) {
     const img = nativeImage.createFromPath(file)
     if (!img.isEmpty()) {
       const { width } = img.getSize()
-      const MAX = 1920
+      const MAX = 3840
       const resized = width > MAX ? img.resize({ width: MAX }) : img
-      const buf = ext === '.png' ? resized.toPNG() : resized.toJPEG(85)
+      const buf = ext === '.png' ? resized.toPNG() : resized.toJPEG(92)
       return `data:${mime};base64,${buf.toString('base64')}`
     }
   } catch { /* 回退到原文件 */ }
@@ -335,6 +336,11 @@ function injectWallpaperCss(win) {
     #root [data-slot='root'] > div > div { background: transparent !important; }
     #root [data-slot='root'] > div > div > [data-slot] > div {
       background: var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) !important;
+    }
+    /* 输入框上方的渐变白带（composerSeat 的 transparent→bg-base 渐变）：
+       改为主面板同色，消除半透明面板下的白色渐变带 */
+    #root [class*='composerSeat'] {
+      background: var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) !important;
     }`
   wallpaperCssKey = win.webContents.insertCSS(css)
   wallpaperCssKey.catch(() => { wallpaperCssKey = null })
@@ -368,16 +374,16 @@ function applyWallpaper(win, wallpaper) {
     document.documentElement.style.setProperty('--dsh-wallpaper-blur', '${wallpaperBlur()}px')
     document.documentElement.style.setProperty('--dsh-wallpaper-code-alpha', '${wallpaperCodeAlpha()}')
     const applyVars = () => {
-      const isDark = (getComputedStyle(document.documentElement).colorScheme || 'light') === 'dark'
+      const isDark = document.body.hasAttribute('data-ds-dark-theme')
+        || (getComputedStyle(document.documentElement).colorScheme || 'light') === 'dark'
       const a = parseFloat(document.documentElement.style.getPropertyValue('--dsh-wallpaper-code-alpha'))
       const alpha = Number.isFinite(a) ? Math.max(0.08, Math.min(1, a)) : 0.45
       document.body.style.setProperty('--dsw-alias-markdown-code-block',
         isDark ? 'rgba(12,15,22,' + alpha + ')' : 'rgba(255,255,255,' + alpha + ')')
       document.body.style.setProperty('--dsw-alias-markdown-code-block-banner',
         isDark ? 'rgba(20,24,34,' + alpha + ')' : 'rgba(250,251,252,' + alpha + ')')
-      // 侧栏滚动渐隐终点色：半透明，消除设置键上方的泛白块
-      document.body.style.setProperty('--dsw-specific-sidebar-fill',
-        isDark ? 'rgba(12,15,22,0.58)' : 'rgba(255,255,255,0.55)')
+      // 侧栏滚动渐隐终点色：透明，消除设置键上方的白色渐变带
+      document.body.style.setProperty('--dsw-specific-sidebar-fill', 'transparent')
     }
     applyVars()
     window.__dshApplyWallpaperVars = applyVars
