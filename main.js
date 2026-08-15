@@ -375,6 +375,10 @@ function injectWallpaperCss(win) {
       background-repeat: no-repeat !important;
       background-attachment: fixed !important;
       filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
+      /* 顶部 44px 渐入：滚入的文字在遮罩区上部逐渐隐去，
+         壁纸边缘与主区自然衔接，不生硬截断 */
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 44px) !important;
+      mask-image: linear-gradient(to bottom, transparent 0px, black 44px) !important;
     }
     /* 侧栏"新对话"按钮：透明开关由 --dsh-t-new-session 控制 */
     #root [class*='newSession'] {
@@ -580,11 +584,12 @@ function configuredWallpaper() {
   return null
 }
 
-/** 构建壁纸设置对话框的 HTML（DSH 暗色风格，与关闭对话框一致）。
+/** 构建壁纸设置对话框的 HTML（跟随主窗口亮/暗主题）。
  *  @param blur 当前模糊值；@param codeAlpha 当前代码块透明度；@param image 当前壁纸路径或 null；
  *  @param sidebarImage 侧栏独立壁纸路径或 null（null = 共用主壁纸）；
- *  @param flags 各区域透明开关 {newSession,input,sidebar,main} */
-function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags) {
+ *  @param flags 各区域透明开关 {newSession,input,sidebar,main}；
+ *  @param dark 是否深色主题（false = 浅色） */
+function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, dark = true) {
   const imageName = image === null ? '（无）' : path.basename(image)
   const sidebarName = sidebarImage === null ? '（无）' : path.basename(sidebarImage)
   const alphaPct = Math.round(codeAlpha * 100)
@@ -595,13 +600,21 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags) {
 <title>界面设置</title>
 <style>
   :root {
-    --bg-base: #151517; --border-l2: rgba(255,255,255,0.12);
-    --hover-bg: rgba(255,255,255,0.08); --label-primary: #f9fafb;
-    --label-secondary: #81858c; --label-tertiary: #6b6f76; --accent: #4d6bfe;
+    --bg-base: ${dark ? '#151517' : '#f6f7f9'};
+    --border-l2: ${dark ? 'rgba(255,255,255,0.12)' : 'rgba(15,17,21,0.14)'};
+    --hover-bg: ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,17,21,0.06)'};
+    --label-primary: ${dark ? '#f9fafb' : '#0f1115'};
+    --label-secondary: ${dark ? '#81858c' : '#61666b'};
+    --label-tertiary: ${dark ? '#6b6f76' : '#81858c'};
+    --accent: #4d6bfe;
+    --btn-primary-bg: ${dark ? '#f9fafb' : '#0f1115'};
+    --btn-primary-fg: ${dark ? '#0f1115' : '#f9fafb'};
+    --btn-primary-hover: ${dark ? '#ebecf2' : '#2a2e37'};
   }
   * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
   html, body { height: 100%; }
   body {
+    color-scheme: ${dark ? 'dark' : 'light'};
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
       "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
     background: var(--bg-base); color: var(--label-primary); overflow: hidden;
@@ -651,8 +664,8 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags) {
   .btn:focus-visible { outline: 2px solid rgba(86,134,254,.6); outline-offset: 1px; }
   .btn-ghost { border-color: var(--border-l2); }
   .btn-ghost:hover { background: var(--hover-bg); }
-  .btn-primary { background: #f9fafb; color: #0f1115; font-weight: 600; }
-  .btn-primary:hover { background: #ebecf2; }
+  .btn-primary { background: var(--btn-primary-bg); color: var(--btn-primary-fg); font-weight: 600; }
+  .btn-primary:hover { background: var(--btn-primary-hover); }
 </style>
 </head>
 <body>
@@ -809,10 +822,23 @@ function restoreWallpaperState() {
 }
 
 /** 文件菜单：打开壁纸设置对话框。 */
-function showWallpaperDialog() {
+async function showWallpaperDialog() {
   if (blurDialog !== null && !blurDialog.isDestroyed()) {
     blurDialog.focus()
     return
+  }
+  // 跟随主窗口主题：亮/暗；主窗口卡顿时 1.5s 超时兜底为深色
+  const win = mainWindow
+  let dialogDark = true
+  if (win !== null && !win.isDestroyed()) {
+    try {
+      dialogDark = await Promise.race([
+        win.webContents.executeJavaScript(
+          `document.body.hasAttribute('data-ds-dark-theme') || (getComputedStyle(document.documentElement).colorScheme || 'light') === 'dark'`,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve(true), 1500)),
+      ]) !== false
+    } catch { /* 保持深色 */ }
   }
   blurOriginal = wallpaperBlur()
   codeOriginal = wallpaperCodeAlpha()
@@ -827,7 +853,7 @@ function showWallpaperDialog() {
     show: false,
     frame: false,
     // 同关闭对话框：不透明窗口（Windows 透明窗口有输入问题）
-    backgroundColor: '#151517',
+    backgroundColor: dialogDark ? '#151517' : '#f6f7f9',
     resizable: false,
     minimizable: false,
     maximizable: false,
@@ -847,7 +873,7 @@ function showWallpaperDialog() {
   dlg.on('closed', () => {
     blurDialog = null
   })
-  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal, transparentOriginal))}`)
+  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal, transparentOriginal, dialogDark))}`)
 }
 
 // 滑块/开关实时预览（模糊 + 代码块透明度 + 区域透明开关）
