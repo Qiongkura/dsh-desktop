@@ -242,13 +242,25 @@ function resolveWallpaper() {
   return null
 }
 
-/** 把壁纸图片转成 data: URL（http 页面不能加载 file:// 资源）。 */
+/** 把壁纸图片转成 data: URL（http 页面不能加载 file:// 资源）。
+ *  大图（手机原图可达数十 MB）会拖死渲染器（解码 + 全屏毛玻璃逐帧重采样），
+ *  因此用 nativeImage 缩放到最长边 1920px 后再编码。 */
 function wallpaperDataUrl(file) {
   const ext = path.extname(file).toLowerCase()
   const mime = {
     '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
     '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp',
   }[ext] || 'image/png'
+  try {
+    const img = nativeImage.createFromPath(file)
+    if (!img.isEmpty()) {
+      const { width } = img.getSize()
+      const MAX = 1920
+      const resized = width > MAX ? img.resize({ width: MAX }) : img
+      const buf = ext === '.png' ? resized.toPNG() : resized.toJPEG(85)
+      return `data:${mime};base64,${buf.toString('base64')}`
+    }
+  } catch { /* 回退到原文件 */ }
   return `data:${mime};base64,${fs.readFileSync(file).toString('base64')}`
 }
 
