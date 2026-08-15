@@ -16,3 +16,8 @@ build/icon-base-512.png
 .toolchain/7za-wrapper.exe
 .toolchain/runtime-staging/
 .toolchain/test-home/
+
+# diagnostic artifacts (keep out of the repo)
+.diag-data/
+diag-*
+installed-main.js
