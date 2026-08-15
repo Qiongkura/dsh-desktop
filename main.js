@@ -381,6 +381,21 @@ function injectWallpaperCss(win) {
       -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 44px) !important;
       mask-image: linear-gradient(to bottom, transparent 0px, black 44px) !important;
     }
+    /* 侧栏底部：把原 24px 主题渐隐层改为壁纸遮挡层——
+       会话列表滚到底部时，文字在顶部 32px 渐变区渐隐，
+       下方被不透明壁纸盖住（与输入框同款遮挡+渐变） */
+    #root [data-slot='root'] > div > div:first-child [class$='treeBody'] [class$='fade'] {
+      height: 72px !important;
+      pointer-events: none !important;
+      background-image: var(--dsh-wallpaper-url-sidebar, var(--dsh-wallpaper-url)) !important;
+      background-position: center !important;
+      background-size: cover !important;
+      background-repeat: no-repeat !important;
+      background-attachment: var(--dsh-sidebar-attachment, fixed) !important;
+      filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 32px) !important;
+      mask-image: linear-gradient(to bottom, transparent 0px, black 32px) !important;
+    }
     /* 侧栏"新对话"按钮：透明开关由 --dsh-t-new-session 控制 */
     #root [class*='newSession'] {
       background: var(--dsh-t-new-session, transparent) !important;
@@ -468,6 +483,13 @@ function applyWallpaper(win, wallpaper) {
       document.documentElement.style.setProperty('--dsh-wallpaper-panel-sidebar',
         T.sidebar ? panelColor
           : (isDark ? 'var(--dsw-static-neutral-bluish-900)' : 'var(--dsw-static-neutral-bluish-50)'))
+      // 面板前景（标题栏文字/边框/悬停）：跟随外观明暗，与面板色同源
+      document.documentElement.style.setProperty('--dsh-wallpaper-panel-fg',
+        isDark ? 'rgba(249,250,251,0.92)' : 'rgba(15,17,21,0.92)')
+      document.documentElement.style.setProperty('--dsh-wallpaper-panel-border',
+        isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)')
+      document.documentElement.style.setProperty('--dsh-wallpaper-panel-hover',
+        isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)')
       // 输入框卡片（含"新会话"英雄卡片）
       document.body.style.setProperty('--dsw-specific-input-major',
         T.input ? 'transparent'
@@ -500,6 +522,9 @@ function applyWallpaper(win, wallpaper) {
       document.body.style.removeProperty('--dsw-specific-input-major')
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel')
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel-sidebar')
+      document.documentElement.style.removeProperty('--dsh-wallpaper-panel-fg')
+      document.documentElement.style.removeProperty('--dsh-wallpaper-panel-border')
+      document.documentElement.style.removeProperty('--dsh-wallpaper-panel-hover')
       document.documentElement.style.removeProperty('--dsh-wallpaper-blur')
       document.documentElement.style.removeProperty('--dsh-wallpaper-code-alpha')
       document.documentElement.style.removeProperty('--dsh-t-new-session')
@@ -1253,12 +1278,23 @@ ipcMain.on('dsh:tb-close', () => {
   // 走 close 事件：触发「隐藏到托盘 / 直接退出」询问
   if (mainWindow !== null && !mainWindow.isDestroyed()) mainWindow.close()
 })
-// 标题栏「文件/视图/帮助」→ 原生弹出菜单（在按钮下方）
-ipcMain.on('dsh:tb-menu', (_event, payload) => {
+// 标题栏「文件/视图/帮助」→ 下发菜单项，页面自绘下拉菜单（跟随外观）
+ipcMain.on('dsh:tb-menu', (event, payload) => {
   const { name, x, y } = payload || {}
   const submenu = titlebarMenus === null ? null : titlebarMenus[name]
   if (submenu === undefined) return
-  Menu.buildFromTemplate(submenu).popup({ window: mainWindow, x: Math.round(x), y: Math.round(y) })
+  event.sender.send('dsh:tb-menu-data', {
+    name,
+    x: Math.round(x),
+    y: Math.round(y),
+    items: submenu.map((item) => item.type === 'separator'
+      ? { type: 'separator' }
+      : { id: item.id, label: item.label, enabled: item.enabled !== false, accelerator: item.accelerator || '' }),
+  })
+})
+// 自绘菜单项点击 → 主进程执行对应动作
+ipcMain.on('dsh:tb-menu-action', (_event, id) => {
+  if (typeof id === 'string') runTitlebarAction(id)
 })
 
 // ---------------------------------------------------------------- 托盘 ----
@@ -1414,60 +1450,108 @@ ipcMain.handle('dsh:close-dialog-icon', () => closeDialogIconDataUri())
 
 // ---------------------------------------------------------------- 菜单 ----
 
-// 菜单子模板：应用菜单（保留快捷键，无边框窗口下不显示）与标题栏弹出菜单共用
+// 菜单子模板：应用菜单（保留快捷键，无边框窗口下不显示）与标题栏自绘下拉菜单共用。
+// 每项带稳定 id：下拉菜单渲染时下发 id，点击后经 IPC 回主进程执行。
 let titlebarMenus = null
+let menuRuntime = null
+let menuUrl = ''
 
 function menuSubmenus(runtime, url) {
   return {
     file: [
-      { label: '在浏览器中打开', click: () => shell.openExternal(url) },
+      { id: 'open-external', label: '在浏览器中打开' },
       { type: 'separator' },
-      { label: '界面设置…', click: () => { showWallpaperDialog() } },
-      { label: '清除壁纸', click: () => { clearWallpaper() } },
+      { id: 'settings', label: '界面设置…' },
+      { id: 'clear-wallpaper', label: '清除壁纸' },
       { type: 'separator' },
-      { label: '隐藏到托盘', enabled: trayEnabled, click: () => hideToTray() },
+      { id: 'hide-tray', label: '隐藏到托盘', enabled: trayEnabled },
       { type: 'separator' },
-      { role: 'quit', label: '退出' },
+      { id: 'quit', label: '退出', accelerator: 'Alt+F4' },
     ],
     view: [
-      { role: 'reload', label: '重新加载' },
-      { role: 'forceReload', label: '强制重新加载' },
+      { id: 'reload', label: '重新加载', accelerator: 'Ctrl+R' },
+      { id: 'force-reload', label: '强制重新加载', accelerator: 'Ctrl+Shift+R' },
       { type: 'separator' },
-      { role: 'resetZoom', label: '实际大小' },
-      { role: 'zoomIn', label: '放大' },
-      { role: 'zoomOut', label: '缩小' },
+      { id: 'reset-zoom', label: '实际大小', accelerator: 'Ctrl+0' },
+      { id: 'zoom-in', label: '放大', accelerator: 'Ctrl++' },
+      { id: 'zoom-out', label: '缩小', accelerator: 'Ctrl+-' },
       { type: 'separator' },
-      { role: 'togglefullscreen', label: '全屏' },
-      { role: 'toggleDevTools', label: '开发者工具' },
+      { id: 'fullscreen', label: '全屏', accelerator: 'F11' },
+      { id: 'devtools', label: '开发者工具', accelerator: 'Ctrl+Shift+I' },
     ],
     help: [
-      { label: '打开 DSH 目录', click: () => shell.openPath(runtime.root) },
-      { label: '打开日志目录', click: () => shell.openPath(path.join(app.getPath('userData'), 'logs')) },
+      { id: 'open-dsh-dir', label: '打开 DSH 目录' },
+      { id: 'open-logs', label: '打开日志目录' },
       { type: 'separator' },
-      {
-        label: '关于',
-        click: () => dialog.showMessageBox({
-          type: 'info',
-          title: APP_NAME,
-          message: APP_NAME,
-          detail: `版本 ${app.getVersion()}\n`
-            + `运行时: ${runtime.root}（${runtime.bundled ? '内置' : '外部'}）\n`
-            + `服务地址: ${url}\n`
-            + `Electron ${process.versions.electron} / Chromium ${process.versions.chrome}`,
-        }),
-      },
+      { id: 'about', label: '关于' },
     ],
   }
 }
 
+/** 执行标题栏菜单动作（自绘下拉菜单点击 / 应用菜单兜底共用）。 */
+function runTitlebarAction(id) {
+  const w = mainWindow
+  switch (id) {
+    case 'open-external': shell.openExternal(menuUrl); break
+    case 'settings': showWallpaperDialog(); break
+    case 'clear-wallpaper': clearWallpaper(); break
+    case 'hide-tray': hideToTray(); break
+    case 'quit': appQuitting = true; app.quit(); break
+    case 'reload': if (w !== null && !w.isDestroyed()) w.webContents.reload(); break
+    case 'force-reload': if (w !== null && !w.isDestroyed()) w.webContents.reloadIgnoringCache(); break
+    case 'reset-zoom': if (w !== null && !w.isDestroyed()) w.webContents.setZoomLevel(0); break
+    case 'zoom-in': if (w !== null && !w.isDestroyed()) w.webContents.setZoomLevel(w.webContents.getZoomLevel() + 0.5); break
+    case 'zoom-out': if (w !== null && !w.isDestroyed()) w.webContents.setZoomLevel(w.webContents.getZoomLevel() - 0.5); break
+    case 'fullscreen': if (w !== null && !w.isDestroyed()) w.setFullScreen(!w.isFullScreen()); break
+    case 'devtools': if (w !== null && !w.isDestroyed()) w.webContents.toggleDevTools(); break
+    case 'open-dsh-dir': shell.openPath(menuRuntime.root); break
+    case 'open-logs': shell.openPath(path.join(app.getPath('userData'), 'logs')); break
+    case 'about':
+      dialog.showMessageBox({
+        type: 'info',
+        title: APP_NAME,
+        message: APP_NAME,
+        detail: `版本 ${app.getVersion()}\n`
+          + `运行时: ${menuRuntime.root}（${menuRuntime.bundled ? '内置' : '外部'}）\n`
+          + `服务地址: ${menuUrl}\n`
+          + `Electron ${process.versions.electron} / Chromium ${process.versions.chrome}`,
+      })
+      break
+  }
+}
+
+// 原生角色映射：应用菜单（快捷键）复用同一份模板
+const NATIVE_ROLE_BY_ID = {
+  reload: 'reload',
+  'force-reload': 'forceReload',
+  'reset-zoom': 'resetZoom',
+  'zoom-in': 'zoomIn',
+  'zoom-out': 'zoomOut',
+  fullscreen: 'togglefullscreen',
+  devtools: 'toggleDevTools',
+  quit: 'quit',
+}
+
+function toNativeMenuItem(item) {
+  if (item.type === 'separator') return { type: 'separator' }
+  const role = NATIVE_ROLE_BY_ID[item.id]
+  const native = { label: item.label }
+  if (role !== undefined) native.role = role
+  else native.click = () => runTitlebarAction(item.id)
+  if (item.enabled === false) native.enabled = false
+  return native
+}
+
 function buildMenu(runtime, url) {
+  menuRuntime = runtime
+  menuUrl = url
   titlebarMenus = menuSubmenus(runtime, url)
   const isMac = process.platform === 'darwin'
   const template = [
     ...(isMac ? [{ role: 'appMenu' }] : []),
-    { label: '文件', submenu: titlebarMenus.file },
-    { label: '视图', submenu: titlebarMenus.view },
-    { label: '帮助', submenu: titlebarMenus.help },
+    { label: '文件', submenu: titlebarMenus.file.map(toNativeMenuItem) },
+    { label: '视图', submenu: titlebarMenus.view.map(toNativeMenuItem) },
+    { label: '帮助', submenu: titlebarMenus.help.map(toNativeMenuItem) },
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
