@@ -345,7 +345,8 @@ function injectWallpaperCss(win) {
       width: var(--dsh-sidebar-w, 280px) !important;
       background-image: var(--dsh-wallpaper-url-sidebar, var(--dsh-wallpaper-url)) !important;
       background-attachment: var(--dsh-sidebar-attachment, fixed) !important;
-      filter: blur(calc(var(--dsh-wallpaper-blur, 18px) * 1.6)) !important;
+      /* 与主区同模糊度：共用主图时侧栏和主界面是一张连续图，无缝衔接 */
+      filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
     }
     #root [data-slot='root'] > div,
     #root [data-slot='root'] > div > div { background: transparent !important; }
@@ -359,6 +360,8 @@ function injectWallpaperCss(win) {
     /* 输入框区域：座位本身透明；::before 铺一层与主区视口对齐的壁纸
        （不透明），滚到输入框下方的聊天文字被完全盖住不显示，
        壁纸保持连续；伪元素滤镜只模糊自身，不影响输入内容。
+       遮罩向上延伸 44px（盖到座位上方滚动区）：文字在输入卡片上方
+       就渐隐完毕，卡片区域全程不透明，绝不会和文字重叠。
        主界面不透明时 --dsh-t-composer-mask-url=none 撤销这层壁纸 */
     #root [class*='composerSeat'] {
       background: transparent !important;
@@ -366,7 +369,7 @@ function injectWallpaperCss(win) {
     #root [class*='composerSeat']::before {
       content: '' !important;
       position: absolute !important;
-      inset: 0 !important;
+      inset: -44px 0 0 0 !important;
       z-index: -1 !important;
       pointer-events: none !important;
       background-image: var(--dsh-t-composer-mask-url, var(--dsh-wallpaper-url)) !important;
@@ -375,7 +378,7 @@ function injectWallpaperCss(win) {
       background-repeat: no-repeat !important;
       background-attachment: fixed !important;
       filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
-      /* 顶部 44px 渐入：滚入的文字在遮罩区上部逐渐隐去，
+      /* 顶部 44px 渐入（在座位上方）：文字在卡片上方逐渐隐去，
          壁纸边缘与主区自然衔接，不生硬截断 */
       -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 44px) !important;
       mask-image: linear-gradient(to bottom, transparent 0px, black 44px) !important;
@@ -691,13 +694,13 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
         <button class="smallbtn" id="sidepick">更换…</button>
         <button class="smallbtn" id="sideclear">清除</button>
       </div>
-      <div class="desc" style="margin-top:6px;padding-left:104px">单独设置时侧栏用独立图片（仍比中间更模糊）。</div>
+      <div class="desc" style="margin-top:6px;padding-left:104px">单独设置时侧栏用独立图片。</div>
       <div class="row">
         <span class="label">模糊程度</span>
         <input type="range" id="blur" min="0" max="64" step="1" value="${blur}">
         <span class="val" id="blurval">${blur}px</span>
       </div>
-      <div class="desc" style="margin-top:6px;padding-left:104px">左侧栏固定比中间更模糊 1.6 倍。</div>
+      <div class="desc" style="margin-top:6px;padding-left:104px">侧栏与主界面壁纸无缝衔接为一张图。</div>
       <div class="row">
         <span class="label">代码块透明度</span>
         <input type="range" id="alpha" min="8" max="100" step="1" value="${alphaPct}">
@@ -1296,14 +1299,29 @@ function showMainWindow() {
   win.focus()
 }
 
+/**
+ * 在 asar 打包目录或安装目录 resources/ 中查找图标文件。
+ * 打包版 build/ 目录随 asar 分发；若打包时漏掉（例如手工 asar pack 未带 build/），
+ * 回退到磁盘上的 resources/ 目录（安装后始终存在），保证托盘与对话框 logo 不丢。
+ * @param {string} name 图标文件名（如 icon.ico / icon.png）
+ * @returns {string | undefined} 存在的图标路径，找不到返回 undefined
+ */
+function resolveIcon(name) {
+  const candidates = [
+    path.join(__dirname, 'build', name),
+    path.join(process.resourcesPath ?? '', name),
+  ]
+  return candidates.find((candidate) => fs.existsSync(candidate))
+}
+
 /** 创建系统托盘图标与右键菜单。 */
 function createTray() {
   let image = nativeImage.createEmpty()
-  const ico = path.join(__dirname, 'build', 'icon.ico')
-  const png = path.join(__dirname, 'build', 'icon.png')
-  if (fs.existsSync(ico)) {
+  const ico = resolveIcon('icon.ico')
+  const png = resolveIcon('icon.png')
+  if (ico) {
     image = nativeImage.createFromPath(ico)
-  } else if (fs.existsSync(png)) {
+  } else if (png) {
     image = nativeImage.createFromPath(png).resize({ width: 16, height: 16 })
   }
   tray = new Tray(image)
@@ -1331,11 +1349,11 @@ function createTray() {
 
 /**
  * 关闭确认对话框页眉图标（base64 data URI）。打包版 build/ 目录随 asar 分发，
- * 开发版直接用仓库里的图标。
+ * 开发版直接用仓库里的图标；均缺失时回退安装目录 resources/。
  */
 function closeDialogIconDataUri() {
-  const iconFile = path.join(__dirname, 'build', 'icon.png')
-  if (!fs.existsSync(iconFile)) return ''
+  const iconFile = resolveIcon('icon.png')
+  if (!iconFile) return ''
   const image = nativeImage.createFromPath(iconFile).resize({ width: 32, height: 32 })
   return image.isEmpty() ? '' : `data:image/png;base64,${image.toPNG().toString('base64')}`
 }
@@ -1460,8 +1478,8 @@ function buildMenu(runtime, url) {
 
 function iconPath() {
   for (const name of ['icon.ico', 'icon.png']) {
-    const candidate = path.join(__dirname, 'build', name)
-    if (fs.existsSync(candidate)) return candidate
+    const candidate = resolveIcon(name)
+    if (candidate) return candidate
   }
   return undefined
 }
