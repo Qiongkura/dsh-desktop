@@ -93,6 +93,20 @@ powershell -ExecutionPolicy Bypass -File scripts\build-dist.ps1
 npm run smoke   # 启动 → 等待页面加载完成 → 打印 SMOKE_OK/SMOKE_FAIL 并退出
 ```
 
+## 与官方项目的关系
+
+本项目基于 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 构建。
+
+DeepSeek Harness 的核心能力、插件系统和 Web UI 来自官方项目。本项目主要负责：
+
+- 桌面应用封装
+- 本地服务生命周期管理
+- 桌面窗口和系统托盘集成
+- Windows 安装包构建与发布
+- 桌面环境下的界面适配
+
+如果你希望通过命令行运行 Harness，或者参与核心功能开发，请优先查看官方仓库。
+
 ## 已知限制
 
 - 内置运行时不含 `pnpm`，GUI 里的插件安装/管理功能不可用（浏览、查看不受影响）；
