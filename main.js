@@ -354,71 +354,28 @@ function setWallpaperLayer(win, dataUrl) {
   })()`)
 }
 
-/** 页面加载后应用壁纸：面板毛玻璃 CSS + 壁纸层 + 代码块半透明。 */
+/** 页面加载后应用壁纸：只设置 3 个 CSS 变量 + 写入壁纸 data URL。
+ *  不做任何 MutationObserver / 代码块变量 / 侧栏填充 / 探针 —— 最小化运行时改动，
+ *  排除一切可能干扰渲染进程交互的代码路径。 */
 function applyWallpaper(win, wallpaper) {
   injectWallpaperCss(win)
   const dataUrl = wallpaperDataUrl(wallpaper)
-  // 亮/暗主题自适应：面板底色、模糊值、代码块底色、侧栏填充；主题切换后自动重应用
   win.webContents.executeJavaScript(`(() => {
-    const resolveDark = () => (getComputedStyle(document.documentElement).colorScheme || 'light') === 'dark'
-    const codeAlpha = () => {
-      const raw = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dsh-wallpaper-code-alpha'))
-      const a = Number.isFinite(raw) ? Math.max(0.08, Math.min(1, raw)) : 0.45
-      return a
-    }
-    const applyCodeVars = () => {
-      const dark = resolveDark()
-      const a = codeAlpha()
-      document.body.style.setProperty('--dsw-alias-markdown-code-block',
-        dark ? 'rgba(12,15,22,' + a + ')' : 'rgba(255,255,255,' + a + ')')
-      document.body.style.setProperty('--dsw-alias-markdown-code-block-banner',
-        dark ? 'rgba(20,24,34,' + a + ')' : 'rgba(250,251,252,' + a + ')')
-    }
-    applyCodeVars()
-    window.__dshApplyCodeVars = applyCodeVars
-    const observer = new MutationObserver(applyCodeVars)
-    observer.observe(document.body, { attributes: true, attributeFilter: ['style'] })
+    const scheme = getComputedStyle(document.documentElement).colorScheme || 'light'
+    const dark = scheme === 'dark'
+    document.documentElement.style.setProperty('--dsh-wallpaper-panel',
+      dark ? 'rgba(12,15,22,0.58)' : 'rgba(255,255,255,0.55)')
+    document.documentElement.style.setProperty('--dsh-wallpaper-blur', '${wallpaperBlur()}px')
     window.__dshWallpaperCleanup = () => {
-      observer.disconnect()
-      document.body.style.removeProperty('--dsw-alias-markdown-code-block')
-      document.body.style.removeProperty('--dsw-alias-markdown-code-block-banner')
-      document.body.style.removeProperty('--dsw-specific-sidebar-fill')
       document.body.style.removeProperty('--dsh-wallpaper-url')
       document.body.style.removeProperty('--dsh-sidebar-w')
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel')
       document.documentElement.style.removeProperty('--dsh-wallpaper-blur')
       document.documentElement.style.removeProperty('--dsh-wallpaper-code-alpha')
     }
-    const scheme = getComputedStyle(document.documentElement).colorScheme || 'light'
-    const dark = scheme === 'dark'
-    const panelColor = dark ? 'rgba(12,15,22,0.58)' : 'rgba(255,255,255,0.55)'
-    document.documentElement.style.setProperty('--dsh-wallpaper-panel', panelColor)
-    document.documentElement.style.setProperty('--dsh-wallpaper-blur', '${wallpaperBlur()}px')
-    document.documentElement.style.setProperty('--dsh-wallpaper-code-alpha', '${wallpaperCodeAlpha()}')
-    // 侧栏滚动渐隐的终点色：从实色改为半透明，消除设置键上方的泛白块
-    document.body.style.setProperty('--dsw-specific-sidebar-fill', panelColor)
-    const probe = () => {
-      const frame = document.querySelector('#root [data-slot="root"] > div')
-      const slot = document.querySelector('#root [data-slot="root"] > div > div > [data-slot]')
-      const panel = slot ? slot.querySelector(':scope > div') : null
-      const side = document.querySelector('#root [data-slot="root"] > div > div:first-child > [data-slot] > div')
-      const layer = document.getElementById('dsh-wallpaper-layer')
-      return {
-        bodyBg: getComputedStyle(document.body).backgroundColor,
-        frameBg: frame ? getComputedStyle(frame).backgroundColor : '(no frame)',
-        colBg: frame && frame.children[0] ? getComputedStyle(frame.children[0]).backgroundColor : '(no col)',
-        slot: slot ? slot.getAttribute('data-slot') : '(no slot)',
-        panelBg: panel ? getComputedStyle(panel).backgroundColor : '(no panel)',
-        sideBlur: side ? getComputedStyle(side).backdropFilter : '(no side)',
-        layer: layer ? layer.style.backgroundImage.slice(0, 30) : '(no layer)',
-        blur: panel ? getComputedStyle(panel).backdropFilter : '(no panel)',
-        codeBg: document.body.style.getPropertyValue('--dsw-alias-markdown-code-block') || '(unset)',
-        sidebarFill: document.body.style.getPropertyValue('--dsw-specific-sidebar-fill') || '(unset)',
-      }
-    }
-    return JSON.stringify({ scheme, blur: ${wallpaperBlur()}, codeAlpha: ${wallpaperCodeAlpha()}, ...probe() })
+    return JSON.stringify({ scheme, blur: ${wallpaperBlur()} })
   })()`).then((state) => {
-    log(`wallpaper applied: ${state}`)
+    log('wallpaper applied: ' + state)
   }).catch((error) => log('wallpaper scheme detection failed:', String(error)))
   setWallpaperLayer(win, dataUrl).catch((error) => log('wallpaper layer failed:', String(error)))
 }
