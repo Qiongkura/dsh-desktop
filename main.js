@@ -299,13 +299,38 @@ function wallpaperCodeAlpha() {
 /** 已注入的面板 CSS key（用于清除壁纸时移除）；壁纸层是 JS 创建的 div，可即时换图。 */
 let wallpaperCssKey = null
 
-/** 注入面板半透明 CSS（幂等）。模糊由独立的毛玻璃层实现（backdrop-filter
- *  会创建 containing block，把 fixed 弹窗困在面板内——因此面板本身不背模糊）。 */
+/** 注入壁纸 CSS（幂等）。壁纸完全用 CSS 实现：body 的 ::before/::after 伪元素
+ *  作为最底层背景（负 z-index + 不接收指针事件），模糊用 filter 模糊自身背景副本；
+ *  不创建任何 JS 层、不设 ResizeObserver、不碰布局——不可能拦截输入或盖住界面。 */
 function injectWallpaperCss(win) {
   if (wallpaperCssKey !== null) return wallpaperCssKey
   const css = `
     html { background: transparent !important; }
     body { background: transparent !important; }
+    body::before, body::after {
+      content: '' !important;
+      position: fixed !important;
+      top: 0 !important;
+      height: 100vh !important;
+      z-index: -1 !important;
+      pointer-events: none !important;
+      background-image: var(--dsh-wallpaper-url) !important;
+      background-position: center !important;
+      background-size: cover !important;
+      background-repeat: no-repeat !important;
+    }
+    /* 全窗：标准模糊 */
+    body::before {
+      left: 0 !important;
+      right: 0 !important;
+      filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
+    }
+    /* 左侧栏区域：更糊 1.6 倍（盖在 ::before 之上） */
+    body::after {
+      left: 0 !important;
+      width: var(--dsh-sidebar-w, 280px) !important;
+      filter: blur(calc(var(--dsh-wallpaper-blur, 18px) * 1.6)) !important;
+    }
     #root [data-slot='root'] > div,
     #root [data-slot='root'] > div > div { background: transparent !important; }
     #root [data-slot='root'] > div > div > [data-slot] > div {
@@ -316,51 +341,16 @@ function injectWallpaperCss(win) {
   return wallpaperCssKey
 }
 
-/** 在页面里创建/更新壁纸层与两个模糊副本层。
- *  安全设计（绝不影响交互）：
- *  - 所有层都是 body 的直接子元素、z-index 为负、pointer-events:none；
- *  - 模糊层 blur 的是**自己的背景副本**（filter: blur，一次性渲染），
- *    不是 backdrop-filter（不采样页面、不创建 containing block、不逐帧重算）；
- *  - 页面内容（#root）始终绘制在它们之上。 */
+/** 应用壁纸：把图片 data URL 写入 CSS 变量（body::before/::after 即时生效）。 */
 function setWallpaperLayer(win, dataUrl) {
   return win.webContents.executeJavaScript(`(() => {
-    const mk = (id, z, blurExpr) => {
-      let d = document.getElementById(id)
-      if (!d) {
-        d = document.createElement('div')
-        d.id = id
-        d.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100vh;z-index:' + z + ';pointer-events:none;background-position:center;background-size:cover;background-repeat:no-repeat'
-        if (blurExpr) d.style.filter = 'blur(' + blurExpr + ')'
-        document.body.appendChild(d)
-      }
-      d.style.backgroundImage = "url('${dataUrl}')"
-      d.style.display = 'block'
-      return d
-    }
-    const wall = mk('dsh-wallpaper-layer', -2, null)
-    const side = mk('dsh-wallpaper-blur-side', -1, 'calc(var(--dsh-wallpaper-blur, 18px) * 1.6)')
-    const main = mk('dsh-wallpaper-blur-main', -1, 'var(--dsh-wallpaper-blur, 18px)')
+    document.body.style.setProperty('--dsh-wallpaper-url', "url('${dataUrl}')")
     const frame = document.querySelector('#root [data-slot="root"] > div')
-    const sync = () => {
-      if (!frame) return
-      const rect = frame.getBoundingClientRect()
-      const first = frame.children[0]
-      const w1 = first ? first.getBoundingClientRect().width : 280
-      side.style.left = rect.left + 'px'
-      side.style.top = rect.top + 'px'
-      side.style.width = w1 + 'px'
-      side.style.height = rect.height + 'px'
-      main.style.left = (rect.left + w1) + 'px'
-      main.style.top = rect.top + 'px'
-      main.style.width = Math.max(0, rect.width - w1) + 'px'
-      main.style.height = rect.height + 'px'
+    const first = frame ? frame.children[0] : null
+    if (first) {
+      document.body.style.setProperty('--dsh-sidebar-w', first.getBoundingClientRect().width + 'px')
     }
-    sync()
-    if (!window.__dshWallpaperBlurSync) {
-      if (frame) new ResizeObserver(sync).observe(frame)
-      window.__dshWallpaperBlurSync = sync
-    }
-    return wall.style.backgroundImage.slice(0, 40)
+    return document.body.style.getPropertyValue('--dsh-wallpaper-url').slice(0, 40)
   })()`)
 }
 
@@ -393,14 +383,11 @@ function applyWallpaper(win, wallpaper) {
       document.body.style.removeProperty('--dsw-alias-markdown-code-block')
       document.body.style.removeProperty('--dsw-alias-markdown-code-block-banner')
       document.body.style.removeProperty('--dsw-specific-sidebar-fill')
+      document.body.style.removeProperty('--dsh-wallpaper-url')
+      document.body.style.removeProperty('--dsh-sidebar-w')
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel')
       document.documentElement.style.removeProperty('--dsh-wallpaper-blur')
       document.documentElement.style.removeProperty('--dsh-wallpaper-code-alpha')
-      for (const id of ['dsh-wallpaper-blur-side', 'dsh-wallpaper-blur-main']) {
-        const d = document.getElementById(id)
-        if (d) d.remove()
-      }
-      delete window.__dshWallpaperBlurSync
     }
     const scheme = getComputedStyle(document.documentElement).colorScheme || 'light'
     const dark = scheme === 'dark'
