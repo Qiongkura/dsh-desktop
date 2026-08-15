@@ -1,0 +1,91 @@
+/* 一体化标题栏（注入到 GUI 页面）。类浏览器布局：
+   左侧 [<] [>] 文件 视图 帮助，右侧 最小化 最大化 关闭。
+   背景优先跟随壁纸面板色（--dsh-wallpaper-panel），无壁纸时按系统主题毛玻璃。 */
+#dsh-titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  background: var(--dsh-wallpaper-panel, var(--dsh-tb-bg, rgba(12, 15, 22, 0.72)));
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--dsh-tb-border, rgba(255, 255, 255, 0.08));
+  color: var(--dsh-tb-fg, #f9fafb);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  font-size: 13px;
+  user-select: none;
+}
+#dsh-titlebar * { box-sizing: border-box; }
+/* 只有中间空白区可拖动窗口：整条栏 drag 会吞掉按钮的鼠标事件 */
+#dsh-titlebar .dsh-tb-spacer {
+  -webkit-app-region: drag;
+  flex: 1;
+  align-self: stretch;
+}
+#dsh-titlebar button {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+  transition: background-color 0.12s ease;
+}
+#dsh-titlebar button:focus-visible { outline: 1px solid rgba(86, 134, 254, 0.7); outline-offset: -1px; }
+
+/* 返回 / 前进 */
+#dsh-titlebar .dsh-tb-nbtn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+#dsh-titlebar .dsh-tb-nbtn:hover:not(:disabled) { background: var(--dsh-tb-hover, rgba(255, 255, 255, 0.1)); }
+#dsh-titlebar .dsh-tb-nbtn:disabled { opacity: 0.35; cursor: default; }
+
+/* 菜单按钮 */
+#dsh-titlebar .dsh-tb-mbtn {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-weight: 500;
+}
+#dsh-titlebar .dsh-tb-mbtn:hover { background: var(--dsh-tb-hover, rgba(255, 255, 255, 0.1)); }
+
+#dsh-titlebar .dsh-tb-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: var(--dsh-tb-border, rgba(255, 255, 255, 0.12));
+}
+
+/* 窗口控制按钮（右侧） */
+#dsh-titlebar .dsh-tb-wbtn {
+  width: 44px;
+  height: 32px;
+  border-radius: 8px;
+}
+#dsh-titlebar .dsh-tb-wbtn:hover { background: var(--dsh-tb-hover, rgba(255, 255, 255, 0.1)); }
+#dsh-titlebar .dsh-tb-wbtn#dsh-tb-close:hover { background: rgba(224, 36, 36, 0.9); color: #fff; }
+
+/* 内容区让位标题栏且不产生滚动条：
+   - #root 下移 40px（从标题栏下方开始，不遮挡内容）
+   - 同时把高度压缩为 100vh - 40px，总占位仍为 100vh，页面不会出现滚动条
+   - 页面内部（消息列表等）的滚动容器不受影响 */
+#root {
+  margin-top: 40px !important;
+  height: calc(100vh - 40px) !important;
+}
+html, body { overflow: hidden !important; }

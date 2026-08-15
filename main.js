@@ -895,16 +895,24 @@ function createWindow(url, wallpaper) {
     minWidth: 1024,
     minHeight: 700,
     show: false,
+    // 一体化标题栏：无边框，标题栏由注入到 GUI 页面的自绘栏承担
+    // （左侧 返回/前进/菜单，右侧 最小化/最大化/关闭）
+    frame: false,
     backgroundColor: '#101318',
     icon: iconPath(),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: path.join(__dirname, 'titlebar', 'preload.js'),
     },
   })
 
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => {
+    win.show()
+    // Windows 无边框窗口偶发以最小化状态出现（show:false + frame:false 怪癖）
+    if (win.isMinimized()) win.restore()
+  })
 
   // 点 ×（或 Alt+F4）不直接退出：先弹出 DSH 风格的关闭询问（隐藏到托盘 / 直接退出）
   win.on('close', (event) => {
@@ -926,6 +934,18 @@ function createWindow(url, wallpaper) {
 
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null
+  })
+  win.on('maximize', () => win.webContents.send('dsh:tb-max-state', true))
+  win.on('unmaximize', () => win.webContents.send('dsh:tb-max-state', false))
+
+  // 一体化标题栏的返回/前进：历史栈由页面 document.title 驱动
+  // （DSH 是 SPA，会话/项目切换不改 URL，但标题会变成 "会话名 — DeepSeek Harness"）
+  tbNav = { stack: [], index: -1, suppress: 0 }
+  win.webContents.on('did-navigate', (_event, _navUrl) => {
+    // 页面级导航（含刷新）后清空历史，等页面轮询以当前视图重建
+    tbNav.stack = []
+    tbNav.index = -1
+    tbSendNav(win)
   })
   win.webContents.on('render-process-gone', (_event, details) => {
     log(`renderer gone: reason=${details.reason} exitCode=${details.exitCode}`)
@@ -962,6 +982,8 @@ function createWindow(url, wallpaper) {
     const current = resolveWallpaper()
     if (current !== null) applyWallpaper(win, current)
     applySidebarWallpaper(win)
+    injectTitlebar(win)
+    tbSendNav(win)
     if (smoke) {
       const title = win.webContents.getTitle()
       console.log(`SMOKE_OK ${JSON.stringify({ title, url: win.webContents.getURL() })}`)
@@ -980,6 +1002,126 @@ function createWindow(url, wallpaper) {
   mainWindow = win
   return win
 }
+
+// ---------------------------------------------------------------- 标题栏 ----
+
+let tbNav = null // { stack: string[], index: number, suppress: number }
+
+/** 把标题栏 CSS/JS 注入 GUI 页面（每次页面加载后调用）。 */
+function injectTitlebar(win) {
+  try {
+    const css = fs.readFileSync(path.join(__dirname, 'titlebar', 'inject.css'), 'utf8')
+    const js = fs.readFileSync(path.join(__dirname, 'titlebar', 'inject.js'), 'utf8')
+    win.webContents.insertCSS(css).catch(() => {})
+    win.webContents.executeJavaScript(js).catch((error) => log('titlebar inject failed:', String(error)))
+  } catch (error) {
+    log('titlebar files missing:', String(error))
+  }
+}
+
+/** 推送返回/前进按钮可用状态。 */
+function tbSendNav(win) {
+  if (win === null || win.isDestroyed() || tbNav === null) return
+  win.webContents.send('dsh:tb-nav-state', {
+    canBack: tbNav.index > 0,
+    canForward: tbNav.index < tbNav.stack.length - 1,
+  })
+}
+
+/**
+ * 记录一次"视图"变化（由页面轮询"选中会话索引"上报触发）。
+ * DSH 是 SPA，项目/会话切换不改 URL；后退历史以选中会话在会话列表
+ * （[role=treeitem]）中的索引为条目，后退时按索引点击对应会话项。
+ */
+function tbPushTitle(index) {
+  if (tbNav === null) return
+  if (tbNav.suppress > 0) return
+  const i = Number(index)
+  if (tbNav.stack[tbNav.index] === i) return // 同视图去重（含后退/前进切回）
+  tbNav.stack.splice(tbNav.index + 1, tbNav.stack.length - tbNav.index - 1, i)
+  tbNav.index = tbNav.stack.length - 1
+  tbSendNav(mainWindow)
+}
+
+/**
+ * 后退/前进（delta = -1 / +1）：按目标条目的会话索引点击页面会话列表项
+ * （[role=treeitem]），切换回之前看过的项目。
+ */
+async function titlebarGo(delta) {
+  const win = mainWindow
+  if (win === null || win.isDestroyed() || tbNav === null || tbNav.suppress > 0) return
+  const can = delta < 0 ? tbNav.index > 0 : tbNav.index < tbNav.stack.length - 1
+  if (!can) return
+  const target = tbNav.stack[tbNav.index + delta]
+  tbNav.index += delta
+  tbSendNav(win)
+  if (target < 0) {
+    // 目标为"无会话"初始态：暂无精确恢复方式，回滚
+    tbNav.index -= delta
+    tbSendNav(win)
+    return
+  }
+  tbNav.suppress++
+  try {
+    const clicked = await win.webContents.executeJavaScript(
+      `(() => {
+        const items = Array.from(document.querySelectorAll('[role=treeitem]'));
+        const el = items[${target}];
+        if (!el) return 'missing';
+        const rect = el.getBoundingClientRect();
+        const opts = { bubbles: true, cancelable: true, view: window, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+        el.dispatchEvent(new MouseEvent('mousedown', opts));
+        el.dispatchEvent(new MouseEvent('mouseup', opts));
+        el.dispatchEvent(new MouseEvent('click', opts));
+        return 'clicked';
+      })()`
+    )
+    // 等待目标会话项被选中（aria-selected=true），期间上报被 suppress 忽略
+    const deadline = Date.now() + 3000
+    let ok = false
+    while (Date.now() < deadline) {
+      const sel = await win.webContents.executeJavaScript(
+        `(() => { const items = Array.from(document.querySelectorAll('[role=treeitem]')); const el = items[${target}]; return el ? el.getAttribute('aria-selected') : 'gone'; })()`
+      ).catch(() => '')
+      if (sel === 'true') { ok = true; break }
+      await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+    if (!ok) {
+      tbNav.index -= delta
+      log(`titlebar ${delta < 0 ? 'back' : 'forward'}: session ${target} not selected (click=${clicked})`)
+    }
+  } catch (error) {
+    log('titlebar go failed:', String(error))
+  }
+  tbNav.suppress = Math.max(0, tbNav.suppress - 1)
+  tbSendNav(win)
+}
+
+// 一体化标题栏 IPC：窗口控制 / 导航 / 菜单
+ipcMain.on('dsh:tb-back', () => { titlebarGo(-1) })
+ipcMain.on('dsh:tb-forward', () => { titlebarGo(1) })
+ipcMain.on('dsh:tb-title', (_event, index) => tbPushTitle(index))
+ipcMain.on('dsh:tb-minimize', () => {
+  if (mainWindow !== null && !mainWindow.isDestroyed()) mainWindow.minimize()
+})
+ipcMain.on('dsh:tb-maximize-toggle', () => {
+  const win = mainWindow
+  if (win === null || win.isDestroyed()) return
+  if (win.isMaximized()) win.unmaximize()
+  else win.maximize()
+})
+ipcMain.on('dsh:tb-close', () => {
+  // 走 close 事件：触发「隐藏到托盘 / 直接退出」询问
+  if (mainWindow !== null && !mainWindow.isDestroyed()) mainWindow.close()
+})
+// 标题栏「文件/视图/帮助」→ 原生弹出菜单（在按钮下方）
+ipcMain.on('dsh:tb-menu', (_event, payload) => {
+  const { name, x, y } = payload || {}
+  const submenu = titlebarMenus === null ? null : titlebarMenus[name]
+  if (submenu === undefined) return
+  Menu.buildFromTemplate(submenu).popup({ window: mainWindow, x: Math.round(x), y: Math.round(y) })
+})
+
 // ---------------------------------------------------------------- 托盘 ----
 
 let tray = null
@@ -1118,57 +1260,60 @@ ipcMain.handle('dsh:close-dialog-icon', () => closeDialogIconDataUri())
 
 // ---------------------------------------------------------------- 菜单 ----
 
+// 菜单子模板：应用菜单（保留快捷键，无边框窗口下不显示）与标题栏弹出菜单共用
+let titlebarMenus = null
+
+function menuSubmenus(runtime, url) {
+  return {
+    file: [
+      { label: '在浏览器中打开', click: () => shell.openExternal(url) },
+      { type: 'separator' },
+      { label: '壁纸设置…', click: () => { showWallpaperDialog() } },
+      { label: '清除壁纸', click: () => { clearWallpaper() } },
+      { type: 'separator' },
+      { label: '隐藏到托盘', enabled: trayEnabled, click: () => hideToTray() },
+      { type: 'separator' },
+      { role: 'quit', label: '退出' },
+    ],
+    view: [
+      { role: 'reload', label: '重新加载' },
+      { role: 'forceReload', label: '强制重新加载' },
+      { type: 'separator' },
+      { role: 'resetZoom', label: '实际大小' },
+      { role: 'zoomIn', label: '放大' },
+      { role: 'zoomOut', label: '缩小' },
+      { type: 'separator' },
+      { role: 'togglefullscreen', label: '全屏' },
+      { role: 'toggleDevTools', label: '开发者工具' },
+    ],
+    help: [
+      { label: '打开 DSH 目录', click: () => shell.openPath(runtime.root) },
+      { label: '打开日志目录', click: () => shell.openPath(path.join(app.getPath('userData'), 'logs')) },
+      { type: 'separator' },
+      {
+        label: '关于',
+        click: () => dialog.showMessageBox({
+          type: 'info',
+          title: APP_NAME,
+          message: APP_NAME,
+          detail: `版本 ${app.getVersion()}\n`
+            + `运行时: ${runtime.root}（${runtime.bundled ? '内置' : '外部'}）\n`
+            + `服务地址: ${url}\n`
+            + `Electron ${process.versions.electron} / Chromium ${process.versions.chrome}`,
+        }),
+      },
+    ],
+  }
+}
+
 function buildMenu(runtime, url) {
+  titlebarMenus = menuSubmenus(runtime, url)
   const isMac = process.platform === 'darwin'
   const template = [
     ...(isMac ? [{ role: 'appMenu' }] : []),
-    {
-      label: '文件',
-      submenu: [
-        { label: '在浏览器中打开', click: () => shell.openExternal(url) },
-        { type: 'separator' },
-        { label: '壁纸设置…', click: () => { showWallpaperDialog() } },
-        { label: '清除壁纸', click: () => { clearWallpaper() } },
-        { type: 'separator' },
-        { label: '隐藏到托盘', enabled: trayEnabled, click: () => hideToTray() },
-        { type: 'separator' },
-        { role: 'quit', label: '退出' },
-      ],
-    },
-    {
-      label: '视图',
-      submenu: [
-        { role: 'reload', label: '重新加载' },
-        { role: 'forceReload', label: '强制重新加载' },
-        { type: 'separator' },
-        { role: 'resetZoom', label: '实际大小' },
-        { role: 'zoomIn', label: '放大' },
-        { role: 'zoomOut', label: '缩小' },
-        { type: 'separator' },
-        { role: 'togglefullscreen', label: '全屏' },
-        { role: 'toggleDevTools', label: '开发者工具' },
-      ],
-    },
-    {
-      label: '帮助',
-      submenu: [
-        { label: '打开 DSH 目录', click: () => shell.openPath(runtime.root) },
-        { label: '打开日志目录', click: () => shell.openPath(path.join(app.getPath('userData'), 'logs')) },
-        { type: 'separator' },
-        {
-          label: '关于',
-          click: () => dialog.showMessageBox({
-            type: 'info',
-            title: APP_NAME,
-            message: APP_NAME,
-            detail: `版本 ${app.getVersion()}\n`
-              + `运行时: ${runtime.root}（${runtime.bundled ? '内置' : '外部'}）\n`
-              + `服务地址: ${url}\n`
-              + `Electron ${process.versions.electron} / Chromium ${process.versions.chrome}`,
-          }),
-        },
-      ],
-    },
+    { label: '文件', submenu: titlebarMenus.file },
+    { label: '视图', submenu: titlebarMenus.view },
+    { label: '帮助', submenu: titlebarMenus.help },
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
