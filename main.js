@@ -370,6 +370,10 @@ function injectWallpaperCss(win) {
       background-repeat: no-repeat !important;
       background-attachment: fixed !important;
       filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
+    }
+    /* 侧栏"新对话"按钮：透明，壁纸透出 */
+    #root [class*='newSession'] {
+      background: transparent !important;
     }`
   wallpaperCssKey = win.webContents.insertCSS(css)
   wallpaperCssKey.catch(() => { wallpaperCssKey = null })
