@@ -28,6 +28,8 @@
       "main.js",
       "close-dialog/*",
       "wallpaper-dialog/*",
+      "build/icon.png",
+      "build/icon.ico",
       "package.json",
       "README.md"
     ],

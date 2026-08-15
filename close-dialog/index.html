@@ -134,14 +134,18 @@
     </div>
   </div>
   <script>
-    const { dshCloseDialog } = window
+    // 注意：不能用 `const { dshCloseDialog } = window` 解构 —— 沙箱模式下
+    // contextBridge 注入的 dshCloseDialog 是非可配置的 const 绑定，重复声明会抛
+    // "Identifier 'dshCloseDialog' has already been declared"，导致整个脚本
+    // 不执行（按钮全部失效）。必须通过 window 属性访问。
+    const api = window.dshCloseDialog
     // 图标经 preload/IPC 获取（base64 走 URL 查询串会被 '+' 解码损坏）
-    if (dshCloseDialog) {
-      dshCloseDialog.getIcon().then((uri) => {
+    if (api) {
+      api.getIcon().then((uri) => {
         if (uri) document.getElementById('appIcon').src = uri
       })
     }
-    const choose = (action) => { if (dshCloseDialog) dshCloseDialog.choose(action) }
+    const choose = (action) => { if (api) api.choose(action) }
     document.getElementById('cancel').addEventListener('click', () => choose('cancel'))
     document.getElementById('quit').addEventListener('click', () => choose('quit'))
     document.getElementById('tray').addEventListener('click', () => choose('tray'))

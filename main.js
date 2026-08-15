@@ -281,7 +281,8 @@ function wallpaperBlur() {
 /** 已注入的面板 CSS key（用于清除壁纸时移除）；壁纸层是 JS 创建的 div，可即时换图。 */
 let wallpaperCssKey = null
 
-/** 注入面板毛玻璃 CSS（幂等）。返回注入 key。 */
+/** 注入面板半透明 CSS（幂等）。模糊由独立的毛玻璃层实现（backdrop-filter
+ *  会创建 containing block，把 fixed 弹窗困在面板内——因此面板本身不背模糊）。 */
 function injectWallpaperCss(win) {
   if (wallpaperCssKey !== null) return wallpaperCssKey
   const css = `
@@ -289,35 +290,52 @@ function injectWallpaperCss(win) {
     body { background: transparent !important; }
     #root [data-slot='root'] > div,
     #root [data-slot='root'] > div > div { background: transparent !important; }
-    /* 中间/右侧面板：标准模糊 */
-    #root [data-slot='root'] > div > div:not(:first-child) > [data-slot] > div {
+    #root [data-slot='root'] > div > div > [data-slot] > div {
       background: var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) !important;
-      backdrop-filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
-      -webkit-backdrop-filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
-    }
-    /* 左侧栏：同样透出壁纸，但模糊 1.6 倍，更糊 */
-    #root [data-slot='root'] > div > div:first-child > [data-slot] > div {
-      background: var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) !important;
-      backdrop-filter: blur(calc(var(--dsh-wallpaper-blur, 18px) * 1.6)) !important;
-      -webkit-backdrop-filter: blur(calc(var(--dsh-wallpaper-blur, 18px) * 1.6)) !important;
     }`
   wallpaperCssKey = win.webContents.insertCSS(css)
   wallpaperCssKey.catch(() => { wallpaperCssKey = null })
   return wallpaperCssKey
 }
 
-/** 在页面里创建/更新壁纸层 div（#dsh-wallpaper-layer），即时生效，无需刷新。 */
+/** 在页面里创建/更新壁纸层（z-index:-2）与两个毛玻璃层（z-index:-1，侧栏 1.6 倍模糊）。 */
 function setWallpaperLayer(win, dataUrl) {
   return win.webContents.executeJavaScript(`(() => {
     let el = document.getElementById('dsh-wallpaper-layer')
     if (!el) {
       el = document.createElement('div')
       el.id = 'dsh-wallpaper-layer'
-      el.style.cssText = 'position:fixed;inset:0;z-index:-1;pointer-events:none;background-position:center;background-size:cover;background-repeat:no-repeat;background-attachment:fixed'
+      el.style.cssText = 'position:fixed;inset:0;z-index:-2;pointer-events:none;background-position:center;background-size:cover;background-repeat:no-repeat;background-attachment:fixed'
       document.body.appendChild(el)
     }
     el.style.backgroundImage = "url('${dataUrl}')"
     el.style.display = 'block'
+    // 毛玻璃层：覆盖侧栏 / 中间列，不设面板上以免困住 fixed 弹窗
+    const blurCss = (id, blur) => 'position:fixed;left:0;top:0;height:100vh;z-index:-1;pointer-events:none;backdrop-filter:' + blur + ';-webkit-backdrop-filter:' + blur
+    let side = document.getElementById('dsh-wallpaper-blur-side')
+    let main = document.getElementById('dsh-wallpaper-blur-main')
+    if (!side || !main) {
+      if (!side) { side = document.createElement('div'); side.id = 'dsh-wallpaper-blur-side'; side.style.cssText = blurCss('side', 'blur(calc(var(--dsh-wallpaper-blur, 18px) * 1.6))'); document.body.appendChild(side) }
+      if (!main) { main = document.createElement('div'); main.id = 'dsh-wallpaper-blur-main'; main.style.cssText = blurCss('main', 'blur(var(--dsh-wallpaper-blur, 18px))'); document.body.appendChild(main) }
+      const frame = document.querySelector('#root [data-slot="root"] > div')
+      const sync = () => {
+        if (!frame) return
+        const rect = frame.getBoundingClientRect()
+        const first = frame.children[0]
+        const w1 = first ? first.getBoundingClientRect().width : 280
+        side.style.left = rect.left + 'px'
+        side.style.top = rect.top + 'px'
+        side.style.width = w1 + 'px'
+        side.style.height = rect.height + 'px'
+        main.style.left = (rect.left + w1) + 'px'
+        main.style.top = rect.top + 'px'
+        main.style.width = Math.max(0, rect.width - w1) + 'px'
+        main.style.height = rect.height + 'px'
+      }
+      sync()
+      new ResizeObserver(sync).observe(frame)
+      window.__dshWallpaperBlurSync = sync
+    }
     return el.style.backgroundImage.slice(0, 40)
   })()`)
 }
@@ -332,9 +350,9 @@ function applyWallpaper(win, wallpaper) {
     const applyCodeVars = () => {
       const dark = resolveDark()
       document.body.style.setProperty('--dsw-alias-markdown-code-block',
-        dark ? 'rgba(12,15,22,0.62)' : 'rgba(255,255,255,0.62)')
+        dark ? 'rgba(12,15,22,0.5)' : 'rgba(255,255,255,0.45)')
       document.body.style.setProperty('--dsw-alias-markdown-code-block-banner',
-        dark ? 'rgba(20,24,34,0.55)' : 'rgba(250,251,252,0.6)')
+        dark ? 'rgba(20,24,34,0.45)' : 'rgba(250,251,252,0.45)')
     }
     applyCodeVars()
     const observer = new MutationObserver(applyCodeVars)
@@ -345,6 +363,11 @@ function applyWallpaper(win, wallpaper) {
       document.body.style.removeProperty('--dsw-alias-markdown-code-block-banner')
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel')
       document.documentElement.style.removeProperty('--dsh-wallpaper-blur')
+      for (const id of ['dsh-wallpaper-blur-side', 'dsh-wallpaper-blur-main']) {
+        const d = document.getElementById(id)
+        if (d) d.remove()
+      }
+      delete window.__dshWallpaperBlurSync
     }
     const scheme = getComputedStyle(document.documentElement).colorScheme || 'light'
     const dark = scheme === 'dark'
@@ -453,12 +476,11 @@ function buildWallpaperDialogHtml(current) {
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
       "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
-    background: transparent; color: var(--label-primary); padding: 12px; overflow: hidden;
+    background: var(--bg-base); color: var(--label-primary); overflow: hidden;
   }
   .card {
     height: 100%; display: flex; flex-direction: column;
-    background: var(--bg-base); border: 1px solid var(--border-l2);
-    border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.3);
+    background: var(--bg-base);
     overflow: hidden;
   }
   .body { padding: 18px 20px 0; }
@@ -499,17 +521,20 @@ function buildWallpaperDialogHtml(current) {
     </div>
   </div>
   <script>
-    const { dshWallpaperDialog } = window
+    // 与关闭对话框同理：不能用 const { dshWallpaperDialog } = window 解构
+    // （沙箱 contextBridge 注入的是非可配置 const 绑定，重复声明会抛 SyntaxError，
+    // 导致脚本整体不执行、按钮全失效），必须经 window 属性访问。
+    const api = window.dshWallpaperDialog
     const slider = document.getElementById('slider')
     const val = document.getElementById('val')
-    const apply = (v) => { val.textContent = v + 'px'; dshWallpaperDialog.preview(v) }
+    const apply = (v) => { val.textContent = v + 'px'; api.preview(v) }
     slider.addEventListener('input', () => apply(Number(slider.value)))
     document.getElementById('reset').addEventListener('click', () => { slider.value = 18; apply(18) })
-    document.getElementById('cancel').addEventListener('click', () => dshWallpaperDialog.commit(Number(slider.value), false))
-    document.getElementById('ok').addEventListener('click', () => dshWallpaperDialog.commit(Number(slider.value), true))
+    document.getElementById('cancel').addEventListener('click', () => api.commit(Number(slider.value), false))
+    document.getElementById('ok').addEventListener('click', () => api.commit(Number(slider.value), true))
     window.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') dshWallpaperDialog.commit(Number(slider.value), false)
-      else if (event.key === 'Enter') dshWallpaperDialog.commit(Number(slider.value), true)
+      if (event.key === 'Escape') api.commit(Number(slider.value), false)
+      else if (event.key === 'Enter') api.commit(Number(slider.value), true)
     })
     apply(Number(slider.value))
   </script>
@@ -529,7 +554,8 @@ function showWallpaperDialog() {
     height: 210,
     show: false,
     frame: false,
-    transparent: true,
+    // 同关闭对话框：不能用 transparent（Windows 透明窗口有输入问题），不透明窗口
+    backgroundColor: '#151517',
     resizable: false,
     minimizable: false,
     maximizable: false,
@@ -537,7 +563,6 @@ function showWallpaperDialog() {
     skipTaskbar: true,
     parent: mainWindow,
     modal: true,
-    backgroundColor: '#00000000',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -731,6 +756,17 @@ function createTray() {
 }
 
 /**
+ * 关闭确认对话框页眉图标（base64 data URI）。打包版 build/ 目录随 asar 分发，
+ * 开发版直接用仓库里的图标。
+ */
+function closeDialogIconDataUri() {
+  const iconFile = path.join(__dirname, 'build', 'icon.png')
+  if (!fs.existsSync(iconFile)) return ''
+  const image = nativeImage.createFromPath(iconFile).resize({ width: 32, height: 32 })
+  return image.isEmpty() ? '' : `data:image/png;base64,${image.toPNG().toString('base64')}`
+}
+
+/**
  * 弹出关闭确认对话框（无边框、DSH 风格、模态于主窗口）。
  * 页面：close-dialog/index.html，preload 把按钮结果回传主进程。
  * @returns {Promise<'cancel'|'tray'|'quit'>}
@@ -738,15 +774,6 @@ function createTray() {
 function askCloseAction() {
   return new Promise((resolve) => {
     resolveCloseAction = resolve
-    // 图标以 base64 data URI 传入页面（file: 页面跨协议加载图片会被拦）
-    let iconDataUri = ''
-    const iconFile = path.join(__dirname, 'build', 'icon.png')
-    if (fs.existsSync(iconFile)) {
-      const image = nativeImage.createFromPath(iconFile).resize({ width: 32, height: 32 })
-      if (!image.isEmpty()) {
-        iconDataUri = `data:image/png;base64,${image.toPNG().toString('base64')}`
-      }
-    }
     const dlg = new BrowserWindow({
       width: 480,
       height: 250,
@@ -778,7 +805,7 @@ function askCloseAction() {
       resolveCloseAction = null
       if (typeof done === 'function') done('cancel')
     })
-    dlg.loadFile(path.join(__dirname, 'close-dialog', 'index.html'), { query: { icon: iconDataUri } })
+    dlg.loadFile(path.join(__dirname, 'close-dialog', 'index.html'))
   })
 }
 
@@ -791,6 +818,9 @@ ipcMain.on('dsh:close-dialog-action', (_event, action) => {
   const dlg = closeDialog
   if (dlg !== null && !dlg.isDestroyed()) dlg.close()
 })
+
+// 对话框请求页眉图标（base64 经 IPC 传递，避免 URL 编码把 '+' 解码成空格损坏图片）
+ipcMain.handle('dsh:close-dialog-icon', () => closeDialogIconDataUri())
 
 // ---------------------------------------------------------------- 菜单 ----
 
@@ -937,44 +967,6 @@ if (!gotLock) {
     buildMenu(runtime, url)
     createWindow(url, wallpaper)
     if (trayEnabled) createTray()
-
-    // ===== TEMP DIAG: 对话框诊断（验证后移除）=====
-    const diagShot = argvValue('--diag-close-dialog')
-    if (diagShot !== undefined) {
-      setTimeout(() => {
-        askCloseAction().then((action) => {
-          console.log(`DIAG_ACTION ${action}`)
-          appQuitting = true
-          app.quit()
-        })
-        const poll = setInterval(() => {
-          if (closeDialog !== null && !closeDialog.isDestroyed()) {
-            clearInterval(poll)
-            const stateTimer = setInterval(() => {
-              if (closeDialog === null || closeDialog.isDestroyed()) {
-                console.log('DIAG_DLG gone')
-                clearInterval(stateTimer)
-                return
-              }
-              console.log(`DIAG_DLG vis=${closeDialog.isVisible()} title=[${closeDialog.getTitle()}] url=${closeDialog.webContents.getURL()}`)
-            }, 2000)
-            setTimeout(async () => {
-              try {
-                const has = await closeDialog.webContents.executeJavaScript('typeof window.dshCloseDialog')
-                console.log(`DIAG_PRELOAD ${has}`)
-                const theme = await mainWindow.webContents.executeJavaScript(
-                  'JSON.stringify({ bg: getComputedStyle(document.body).backgroundColor, dark: matchMedia("(prefers-color-scheme: dark)").matches })')
-                console.log(`DIAG_THEME ${theme}`)
-                const img = await closeDialog.webContents.capturePage()
-                fs.writeFileSync(diagShot, img.toPNG())
-                console.log('DIAG_SHOT_SAVED')
-              } catch (error) { console.log(`DIAG_FAIL ${String(error)}`) }
-            }, 1000)
-          }
-        }, 200)
-      }, 2500)
-    }
-    // ===== TEMP DIAG END =====
   })
 
   app.on('window-all-closed', () => {
