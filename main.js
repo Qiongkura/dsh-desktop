@@ -354,9 +354,9 @@ function setWallpaperLayer(win, dataUrl) {
   })()`)
 }
 
-/** 页面加载后应用壁纸：只设置 3 个 CSS 变量 + 写入壁纸 data URL。
- *  不做任何 MutationObserver / 代码块变量 / 侧栏填充 / 探针 —— 最小化运行时改动，
- *  排除一切可能干扰渲染进程交互的代码路径。 */
+/** 页面加载后应用壁纸：只做一次性 CSS 变量设置 + 写入壁纸 data URL。
+ *  无 MutationObserver、无监听器、无探针 —— 全部是一次性赋值；
+ *  代码块透明度/侧栏填充由 __dshApplyWallpaperVars() 按需手动重应用（对话框滑杆调用）。 */
 function applyWallpaper(win, wallpaper) {
   injectWallpaperCss(win)
   const dataUrl = wallpaperDataUrl(wallpaper)
@@ -366,14 +366,32 @@ function applyWallpaper(win, wallpaper) {
     document.documentElement.style.setProperty('--dsh-wallpaper-panel',
       dark ? 'rgba(12,15,22,0.58)' : 'rgba(255,255,255,0.55)')
     document.documentElement.style.setProperty('--dsh-wallpaper-blur', '${wallpaperBlur()}px')
+    document.documentElement.style.setProperty('--dsh-wallpaper-code-alpha', '${wallpaperCodeAlpha()}')
+    const applyVars = () => {
+      const isDark = (getComputedStyle(document.documentElement).colorScheme || 'light') === 'dark'
+      const a = parseFloat(document.documentElement.style.getPropertyValue('--dsh-wallpaper-code-alpha'))
+      const alpha = Number.isFinite(a) ? Math.max(0.08, Math.min(1, a)) : 0.45
+      document.body.style.setProperty('--dsw-alias-markdown-code-block',
+        isDark ? 'rgba(12,15,22,' + alpha + ')' : 'rgba(255,255,255,' + alpha + ')')
+      document.body.style.setProperty('--dsw-alias-markdown-code-block-banner',
+        isDark ? 'rgba(20,24,34,' + alpha + ')' : 'rgba(250,251,252,' + alpha + ')')
+      // 侧栏滚动渐隐终点色：半透明，消除设置键上方的泛白块
+      document.body.style.setProperty('--dsw-specific-sidebar-fill',
+        isDark ? 'rgba(12,15,22,0.58)' : 'rgba(255,255,255,0.55)')
+    }
+    applyVars()
+    window.__dshApplyWallpaperVars = applyVars
     window.__dshWallpaperCleanup = () => {
       document.body.style.removeProperty('--dsh-wallpaper-url')
       document.body.style.removeProperty('--dsh-sidebar-w')
+      document.body.style.removeProperty('--dsw-alias-markdown-code-block')
+      document.body.style.removeProperty('--dsw-alias-markdown-code-block-banner')
+      document.body.style.removeProperty('--dsw-specific-sidebar-fill')
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel')
       document.documentElement.style.removeProperty('--dsh-wallpaper-blur')
       document.documentElement.style.removeProperty('--dsh-wallpaper-code-alpha')
     }
-    return JSON.stringify({ scheme, blur: ${wallpaperBlur()} })
+    return JSON.stringify({ scheme, blur: ${wallpaperBlur()}, codeAlpha: ${wallpaperCodeAlpha()} })
   })()`).then((state) => {
     log('wallpaper applied: ' + state)
   }).catch((error) => log('wallpaper scheme detection failed:', String(error)))
@@ -434,14 +452,14 @@ function setWallpaperBlurVar(value) {
   ).catch(() => {})
 }
 
-/** 把代码块透明度写到页面（实时预览用）。 */
+/** 把代码块透明度写到页面（实时预览用，手动重应用，无观察器）。 */
 function setCodeAlphaVar(value) {
   const win = mainWindow
   if (win === null || win.isDestroyed()) return
   const a = Math.max(0.08, Math.min(1, Number(value) || 0.45))
   win.webContents.executeJavaScript(
     `document.documentElement.style.setProperty('--dsh-wallpaper-code-alpha', '${a}');
-     if (typeof window.__dshApplyCodeVars === 'function') window.__dshApplyCodeVars()`,
+     if (typeof window.__dshApplyWallpaperVars === 'function') window.__dshApplyWallpaperVars()`,
   ).catch(() => {})
 }
 
