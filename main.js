@@ -592,7 +592,7 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags) {
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>壁纸设置</title>
+<title>界面设置</title>
 <style>
   :root {
     --bg-base: #151517; --border-l2: rgba(255,255,255,0.12);
@@ -658,7 +658,7 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags) {
 <body>
   <div class="card">
     <div class="body">
-      <div class="title">壁纸设置</div>
+      <div class="title">界面设置</div>
       <div class="imgrow">
         <span class="label">壁纸图片</span>
         <span class="imgname" id="imgname">${imageName}</span>
@@ -1286,7 +1286,7 @@ function createTray() {
     { label: '显示主窗口', click: showMainWindow },
     { label: '隐藏主窗口', click: hideToTray },
     { type: 'separator' },
-    { label: '壁纸设置…', click: () => { showMainWindow(); showWallpaperDialog() } },
+    { label: '界面设置…', click: () => { showMainWindow(); showWallpaperDialog() } },
     { type: 'separator' },
     { label: '在浏览器中打开', click: () => shell.openExternal(`http://${DEFAULT_HOST}:${resolvePort()}`) },
     { type: 'separator' },
@@ -1380,7 +1380,7 @@ function menuSubmenus(runtime, url) {
     file: [
       { label: '在浏览器中打开', click: () => shell.openExternal(url) },
       { type: 'separator' },
-      { label: '壁纸设置…', click: () => { showWallpaperDialog() } },
+      { label: '界面设置…', click: () => { showWallpaperDialog() } },
       { label: '清除壁纸', click: () => { clearWallpaper() } },
       { type: 'separator' },
       { label: '隐藏到托盘', enabled: trayEnabled, click: () => hideToTray() },
