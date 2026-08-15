@@ -7,7 +7,9 @@
   Node.js / pnpm / 拉取 DSH 仓库；
 - 自动探测 `http://127.0.0.1:3080`：GUI 已在运行就直接接管（不重复启动后端）；
 - 否则启动内置后端（内置 node.exe + `@deepseek-ai/dsh` 的 `lib/bin.js`），就绪后打开窗口；
-- 关闭窗口自动回收后端进程；支持单实例、系统浏览器打开外链、菜单栏快捷操作；
+- 点 × 会弹出 DeepSeek Harness 风格的询问：**隐藏到系统托盘** 或 **直接退出**；隐藏后应用与
+  后端继续在后台运行，任务栏图标消失，单击/右键系统托盘图标即可恢复或退出；
+- 支持单实例（托盘隐藏时再次启动会恢复窗口）、系统浏览器打开外链、菜单栏快捷操作；
 - 内置模式把 DSH_HOME 隔离到应用数据目录（`%APPDATA%\DeepSeek Harness Desktop\home`），不干扰本机已有安装；
 - 可打包为绿色单文件 exe（portable）或解压即用的 ZIP 包。
 
@@ -33,7 +35,8 @@
 
 | 路径 | 说明 |
 | --- | --- |
-| `main.js` | Electron 主进程：配置解析、后端进程管理、窗口与菜单 |
+| `main.js` | Electron 主进程：配置解析、后端进程管理、窗口、托盘与关闭询问 |
+| `close-dialog/` | 关闭确认对话框（DSH 风格无边框窗口）：`index.html` + `preload.js`（按钮结果回传主进程） |
 | `scripts/render-icon.cjs` | 用 Electron 把 GUI 官方 favicon（`apps/web/public/favicon.svg`，无 fill 默认黑色）渲染成 512px 图标底图（浅色圆角方块 + 黑色官方标） |
 | `build/build-icons.ps1` | 由底图生成 `build/icon.png`（512）与 `build/icon.ico`（16~256 多尺寸） |
 | `scripts/build-dist.ps1` | 一键构建：渲染图标 → 部署内置运行时 → 修复闭包 → electron-builder |
@@ -83,9 +86,22 @@ powershell -ExecutionPolicy Bypass -File scripts\build-dist.ps1
 | DSH 仓库根目录 | `DSH_ROOT` | `--dsh-root=<路径>` | `G:\deepseek-harness` |
 | 后端端口 | `DSH_PORT` | `--port=<n>` | `3080` |
 | 不拉起后端 | — | `--no-server` | 接管已有服务 |
+| 禁用托盘与关闭询问 | — | `--no-tray` | 点 × 直接退出（旧行为） |
 | 自动化验证 | — | `--smoke-test` | 加载成功打印 `SMOKE_OK` 并退出 |
 
 配置文件位于 `%APPDATA%\DeepSeek Harness Desktop\config.json`（首次成功启动后自动写入），日志在 `%APPDATA%\DeepSeek Harness Desktop\logs\`。
+
+## 托盘与关闭行为
+
+- 点主窗口 ×（或 Alt+F4）弹出 DSH 风格的关闭确认框：`取消` / `直接退出` / `隐藏到托盘`（默认，
+  回车触发；Esc 取消）。选择隐藏后窗口仅隐藏不销毁，后端服务继续运行；
+- 首次隐藏会弹出系统托盘气泡提示；之后可从托盘图标单击恢复窗口、右键菜单执行
+  `显示主窗口` / `隐藏主窗口` / `在浏览器中打开` / `退出`；
+- 应用菜单「文件 → 隐藏到托盘」等效于关闭询问中的隐藏；「文件 → 退出」为真正退出，
+  会回收后端进程；
+- 托盘隐藏状态下再次启动应用（或点击快捷方式）会直接恢复主窗口（单实例）；
+- 关闭确认框为独立无边框窗口（`close-dialog/`，随安装包分发），暗色主题与 GUI 一致；
+- 传 `--no-tray` 可完全禁用该特性，恢复「点 × 即退出」的旧行为（冒烟测试自动禁用）。
 
 ## 冒烟测试
 

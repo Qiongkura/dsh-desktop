@@ -26,6 +26,7 @@
     },
     "files": [
       "main.js",
+      "close-dialog/*",
       "package.json",
       "README.md"
     ],
