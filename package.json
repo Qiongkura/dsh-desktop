@@ -28,6 +28,7 @@
       "main.js",
       "close-dialog/*",
       "wallpaper-dialog/*",
+      "chrome-preload.js",
       "build/icon.png",
       "build/icon.ico",
       "package.json",

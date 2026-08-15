@@ -278,8 +278,52 @@ function wallpaperBlur() {
   return Number.isFinite(n) && n >= 0 && n <= 100 ? n : 18
 }
 
+/** 代码块透明度（0.08-1），来自配置，默认 0.45。 */
+function wallpaperCodeAlpha() {
+  const n = Number(loadConfig().wallpaperCodeAlpha)
+  return Number.isFinite(n) ? Math.max(0.08, Math.min(1, n)) : 0.45
+}
+
 /** 已注入的面板 CSS key（用于清除壁纸时移除）；壁纸层是 JS 创建的 div，可即时换图。 */
 let wallpaperCssKey = null
+
+/** 一体式标题栏：页面内容下移 40px，顶部留出标题栏条（拖拽区 + 原生窗口按钮）。 */
+let chromeCssKey = null
+
+function injectChromeCss(win) {
+  if (chromeCssKey !== null) return chromeCssKey
+  const css = `
+    #root [data-slot='root'] > div {
+      margin-top: 40px !important;
+      height: calc(100% - 40px) !important;
+    }`
+  chromeCssKey = win.webContents.insertCSS(css)
+  chromeCssKey.catch(() => { chromeCssKey = null })
+  return chromeCssKey
+}
+
+/** 创建顶部标题栏条（拖拽区）。z-index:-1：位于内容之下、壁纸之上，不遮挡弹窗。 */
+function setupTitleBar(win) {
+  return win.webContents.executeJavaScript(`(() => {
+    if (document.getElementById('dsh-titlebar')) return 'exists'
+    const bar = document.createElement('div')
+    bar.id = 'dsh-titlebar'
+    bar.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:40px;z-index:-1;-webkit-app-region:drag'
+    document.body.appendChild(bar)
+    // 主题变化（color-scheme）时通知主进程更新原生按钮配色
+    const report = () => {
+      const scheme = getComputedStyle(document.documentElement).colorScheme || 'light'
+      if (window.__dshChrome && typeof window.__dshChrome.reportScheme === 'function') {
+        window.__dshChrome.reportScheme(scheme)
+      }
+    }
+    report()
+    const mo = new MutationObserver(report)
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] })
+    window.__dshTitlebarObserver = mo
+    return 'created'
+  })()`).catch((error) => log('titlebar setup failed:', String(error)))
+}
 
 /** 注入面板半透明 CSS（幂等）。模糊由独立的毛玻璃层实现（backdrop-filter
  *  会创建 containing block，把 fixed 弹窗困在面板内——因此面板本身不背模糊）。 */
@@ -344,25 +388,34 @@ function setWallpaperLayer(win, dataUrl) {
 function applyWallpaper(win, wallpaper) {
   injectWallpaperCss(win)
   const dataUrl = wallpaperDataUrl(wallpaper)
-  // 亮/暗主题自适应：面板底色、模糊值、代码块底色；主题切换（body 样式变更）后自动重应用
+  // 亮/暗主题自适应：面板底色、模糊值、代码块底色、侧栏填充；主题切换后自动重应用
   win.webContents.executeJavaScript(`(() => {
     const resolveDark = () => (getComputedStyle(document.documentElement).colorScheme || 'light') === 'dark'
+    const codeAlpha = () => {
+      const raw = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dsh-wallpaper-code-alpha'))
+      const a = Number.isFinite(raw) ? Math.max(0.08, Math.min(1, raw)) : 0.45
+      return a
+    }
     const applyCodeVars = () => {
       const dark = resolveDark()
+      const a = codeAlpha()
       document.body.style.setProperty('--dsw-alias-markdown-code-block',
-        dark ? 'rgba(12,15,22,0.5)' : 'rgba(255,255,255,0.45)')
+        dark ? 'rgba(12,15,22,' + a + ')' : 'rgba(255,255,255,' + a + ')')
       document.body.style.setProperty('--dsw-alias-markdown-code-block-banner',
-        dark ? 'rgba(20,24,34,0.45)' : 'rgba(250,251,252,0.45)')
+        dark ? 'rgba(20,24,34,' + a + ')' : 'rgba(250,251,252,' + a + ')')
     }
     applyCodeVars()
+    window.__dshApplyCodeVars = applyCodeVars
     const observer = new MutationObserver(applyCodeVars)
     observer.observe(document.body, { attributes: true, attributeFilter: ['style'] })
     window.__dshWallpaperCleanup = () => {
       observer.disconnect()
       document.body.style.removeProperty('--dsw-alias-markdown-code-block')
       document.body.style.removeProperty('--dsw-alias-markdown-code-block-banner')
+      document.body.style.removeProperty('--dsw-specific-sidebar-fill')
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel')
       document.documentElement.style.removeProperty('--dsh-wallpaper-blur')
+      document.documentElement.style.removeProperty('--dsh-wallpaper-code-alpha')
       for (const id of ['dsh-wallpaper-blur-side', 'dsh-wallpaper-blur-main']) {
         const d = document.getElementById(id)
         if (d) d.remove()
@@ -371,9 +424,12 @@ function applyWallpaper(win, wallpaper) {
     }
     const scheme = getComputedStyle(document.documentElement).colorScheme || 'light'
     const dark = scheme === 'dark'
-    document.documentElement.style.setProperty('--dsh-wallpaper-panel',
-      dark ? 'rgba(12,15,22,0.58)' : 'rgba(255,255,255,0.55)')
+    const panelColor = dark ? 'rgba(12,15,22,0.58)' : 'rgba(255,255,255,0.55)'
+    document.documentElement.style.setProperty('--dsh-wallpaper-panel', panelColor)
     document.documentElement.style.setProperty('--dsh-wallpaper-blur', '${wallpaperBlur()}px')
+    document.documentElement.style.setProperty('--dsh-wallpaper-code-alpha', '${wallpaperCodeAlpha()}')
+    // 侧栏滚动渐隐的终点色：从实色改为半透明，消除设置键上方的泛白块
+    document.body.style.setProperty('--dsw-specific-sidebar-fill', panelColor)
     const probe = () => {
       const frame = document.querySelector('#root [data-slot="root"] > div')
       const slot = document.querySelector('#root [data-slot="root"] > div > div > [data-slot]')
@@ -390,9 +446,10 @@ function applyWallpaper(win, wallpaper) {
         layer: layer ? layer.style.backgroundImage.slice(0, 30) : '(no layer)',
         blur: panel ? getComputedStyle(panel).backdropFilter : '(no panel)',
         codeBg: document.body.style.getPropertyValue('--dsw-alias-markdown-code-block') || '(unset)',
+        sidebarFill: document.body.style.getPropertyValue('--dsw-specific-sidebar-fill') || '(unset)',
       }
     }
-    return JSON.stringify({ scheme, blur: ${wallpaperBlur()}, ...probe() })
+    return JSON.stringify({ scheme, blur: ${wallpaperBlur()}, codeAlpha: ${wallpaperCodeAlpha()}, ...probe() })
   })()`).then((state) => {
     log(`wallpaper applied: ${state}`)
   }).catch((error) => log('wallpaper scheme detection failed:', String(error)))
@@ -443,11 +500,6 @@ async function clearWallpaper() {
   }
 }
 
-// ----------------------------------------------------------- 壁纸模糊调节 ----
-
-let blurDialog = null
-let blurOriginal = 18
-
 /** 把模糊值写到主窗口的 CSS 变量（实时预览用）。 */
 function setWallpaperBlurVar(value) {
   const win = mainWindow
@@ -458,13 +510,35 @@ function setWallpaperBlurVar(value) {
   ).catch(() => {})
 }
 
-/** 构建模糊调节对话框的 HTML（DSH 暗色风格，与关闭对话框一致）。 */
-function buildWallpaperDialogHtml(current) {
+/** 把代码块透明度写到页面（实时预览用）。 */
+function setCodeAlphaVar(value) {
+  const win = mainWindow
+  if (win === null || win.isDestroyed()) return
+  const a = Math.max(0.08, Math.min(1, Number(value) || 0.45))
+  win.webContents.executeJavaScript(
+    `document.documentElement.style.setProperty('--dsh-wallpaper-code-alpha', '${a}');
+     if (typeof window.__dshApplyCodeVars === 'function') window.__dshApplyCodeVars()`,
+  ).catch(() => {})
+}
+
+/** 当前壁纸路径（配置，可能为 null）。 */
+function configuredWallpaper() {
+  const cfg = loadConfig()
+  const candidate = cfg.wallpaper
+  if (candidate && fs.existsSync(candidate)) return path.resolve(candidate)
+  return null
+}
+
+/** 构建壁纸设置对话框的 HTML（DSH 暗色风格，与关闭对话框一致）。
+ *  @param blur 当前模糊值；@param codeAlpha 当前代码块透明度；@param image 当前壁纸路径或 null */
+function buildWallpaperDialogHtml(blur, codeAlpha, image) {
+  const imageName = image === null ? '（无）' : path.basename(image)
+  const alphaPct = Math.round(codeAlpha * 100)
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>壁纸模糊</title>
+<title>壁纸设置</title>
 <style>
   :root {
     --bg-base: #151517; --border-l2: rgba(255,255,255,0.12);
@@ -486,10 +560,20 @@ function buildWallpaperDialogHtml(current) {
   .body { padding: 18px 20px 0; }
   .title { font-size: 14px; line-height: 20px; font-weight: 600; }
   .desc { margin-top: 4px; font-size: 12px; line-height: 18px; color: var(--label-secondary); }
-  .row { display: flex; align-items: center; gap: 12px; margin-top: 18px; }
-  input[type=range] { flex: 1; accent-color: var(--accent); height: 4px; }
-  .val { min-width: 44px; text-align: right; font-size: 13px; color: var(--label-primary);
+  .row { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+  .row .label { width: 92px; font-size: 12px; color: var(--label-secondary); flex: none; }
+  .imgrow { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+  .imgname { flex: 1; font-size: 12px; color: var(--label-primary);
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  input[type=range] { flex: 1; accent-color: var(--accent); height: 4px; min-width: 0; }
+  .val { min-width: 52px; text-align: right; font-size: 13px; color: var(--label-primary);
          font-variant-numeric: tabular-nums; }
+  .smallbtn {
+    height: 26px; padding: 0 12px; border-radius: 13px; border: 1px solid var(--border-l2);
+    background: transparent; color: var(--label-primary); font-size: 12px; font-family: inherit;
+    cursor: pointer; flex: none;
+  }
+  .smallbtn:hover { background: var(--hover-bg); }
   .footer { margin-top: auto; display: flex; justify-content: flex-end; align-items: center;
             gap: 10px; padding: 16px 20px 18px; }
   .btn {
@@ -507,12 +591,25 @@ function buildWallpaperDialogHtml(current) {
 <body>
   <div class="card">
     <div class="body">
-      <div class="title">壁纸模糊程度</div>
-      <div class="desc">数值越大越模糊；左侧栏固定比中间更模糊 1.6 倍。</div>
-      <div class="row">
-        <input type="range" id="slider" min="0" max="64" step="1" value="${current}">
-        <span class="val" id="val">${current}px</span>
+      <div class="title">壁纸设置</div>
+      <div class="imgrow">
+        <span class="label">壁纸图片</span>
+        <span class="imgname" id="imgname">${imageName}</span>
+        <button class="smallbtn" id="pick">更换…</button>
+        <button class="smallbtn" id="clearimg">清除</button>
       </div>
+      <div class="row">
+        <span class="label">模糊程度</span>
+        <input type="range" id="blur" min="0" max="64" step="1" value="${blur}">
+        <span class="val" id="blurval">${blur}px</span>
+      </div>
+      <div class="desc" style="margin-top:6px;padding-left:104px">左侧栏固定比中间更模糊 1.6 倍。</div>
+      <div class="row">
+        <span class="label">代码块透明度</span>
+        <input type="range" id="alpha" min="8" max="100" step="1" value="${alphaPct}">
+        <span class="val" id="alphaval">${alphaPct}%</span>
+      </div>
+      <div class="desc" style="margin-top:6px;padding-left:104px">数值越大越不透明（越实）。</div>
     </div>
     <div class="footer">
       <button class="btn btn-ghost" id="reset">恢复默认</button>
@@ -521,40 +618,85 @@ function buildWallpaperDialogHtml(current) {
     </div>
   </div>
   <script>
-    // 与关闭对话框同理：不能用 const { dshWallpaperDialog } = window 解构
-    // （沙箱 contextBridge 注入的是非可配置 const 绑定，重复声明会抛 SyntaxError，
-    // 导致脚本整体不执行、按钮全失效），必须经 window 属性访问。
+    // 与关闭对话框同理：经 window 属性访问 contextBridge 注入的 API
     const api = window.dshWallpaperDialog
-    const slider = document.getElementById('slider')
-    const val = document.getElementById('val')
-    const apply = (v) => { val.textContent = v + 'px'; api.preview(v) }
-    slider.addEventListener('input', () => apply(Number(slider.value)))
-    document.getElementById('reset').addEventListener('click', () => { slider.value = 18; apply(18) })
-    document.getElementById('cancel').addEventListener('click', () => api.commit(Number(slider.value), false))
-    document.getElementById('ok').addEventListener('click', () => api.commit(Number(slider.value), true))
-    window.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') api.commit(Number(slider.value), false)
-      else if (event.key === 'Enter') api.commit(Number(slider.value), true)
+    const blurEl = document.getElementById('blur')
+    const alphaEl = document.getElementById('alpha')
+    const blurVal = document.getElementById('blurval')
+    const alphaVal = document.getElementById('alphaval')
+    const imgName = document.getElementById('imgname')
+    const preview = () => {
+      blurVal.textContent = blurEl.value + 'px'
+      alphaVal.textContent = alphaEl.value + '%'
+      api.preview({ blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100 })
+    }
+    blurEl.addEventListener('input', preview)
+    alphaEl.addEventListener('input', preview)
+    document.getElementById('pick').addEventListener('click', () => api.pickImage())
+    document.getElementById('clearimg').addEventListener('click', () => api.clearImage())
+    api.onImageChosen((file) => {
+      imgName.textContent = file === null ? '（无）' : file.split(/[\\\\/]/).pop()
     })
-    apply(Number(slider.value))
+    document.getElementById('reset').addEventListener('click', () => {
+      blurEl.value = 18; alphaEl.value = 45; preview()
+    })
+    document.getElementById('cancel').addEventListener('click', () => api.commit({ ok: false }))
+    document.getElementById('ok').addEventListener('click', () => api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100 }))
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') api.commit({ ok: false })
+      else if (event.key === 'Enter') api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100 })
+    })
+    preview()
   </script>
 </body>
 </html>`
 }
 
-/** 文件菜单：打开壁纸模糊调节对话框。 */
+// 壁纸设置对话框状态
+let blurDialog = null
+let blurOriginal = 18
+let codeOriginal = 0.45
+let imageOriginal = null
+let imageDraft = null // 对话框内更换后的新壁纸路径（null 表示无）
+
+/** 恢复对话框打开前的壁纸状态（取消时）。 */
+function restoreWallpaperState() {
+  const win = mainWindow
+  if (win === null || win.isDestroyed()) return
+  setWallpaperBlurVar(blurOriginal)
+  setCodeAlphaVar(codeOriginal)
+  if (imageOriginal === null) {
+    win.webContents.executeJavaScript(`(() => {
+      const el = document.getElementById('dsh-wallpaper-layer')
+      if (el) el.style.display = 'none'
+      if (typeof window.__dshWallpaperCleanup === 'function') window.__dshWallpaperCleanup()
+      return true
+    })()`).catch(() => {})
+    if (wallpaperCssKey !== null) {
+      win.webContents.removeInsertedCSS(wallpaperCssKey).catch(() => {})
+      wallpaperCssKey = null
+    }
+  } else {
+    applyWallpaper(win, imageOriginal)
+  }
+}
+
+/** 文件菜单：打开壁纸设置对话框。 */
 function showWallpaperDialog() {
   if (blurDialog !== null && !blurDialog.isDestroyed()) {
     blurDialog.focus()
     return
   }
   blurOriginal = wallpaperBlur()
+  codeOriginal = wallpaperCodeAlpha()
+  imageOriginal = configuredWallpaper()
+  imageDraft = imageOriginal
   const dlg = new BrowserWindow({
-    width: 380,
-    height: 210,
+    width: 420,
+    height: 330,
     show: false,
     frame: false,
-    // 同关闭对话框：不能用 transparent（Windows 透明窗口有输入问题），不透明窗口
+    // 同关闭对话框：不透明窗口（Windows 透明窗口有输入问题）
     backgroundColor: '#151517',
     resizable: false,
     minimizable: false,
@@ -575,28 +717,91 @@ function showWallpaperDialog() {
   dlg.once('ready-to-show', () => dlg.show())
   dlg.on('closed', () => {
     blurDialog = null
-    // 未确定即关闭：还原
-    setWallpaperBlurVar(blurOriginal)
   })
-  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal))}`)
+  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal))}`)
 }
 
-// 滑块实时预览
-ipcMain.on('dsh:wallpaper-blur-preview', (_event, value) => {
-  setWallpaperBlurVar(value)
+// 滑块实时预览（模糊 + 代码块透明度）
+ipcMain.on('dsh:wallpaper-preview', (_event, payload) => {
+  if (payload?.blur !== undefined) setWallpaperBlurVar(payload.blur)
+  if (payload?.codeAlpha !== undefined) setCodeAlphaVar(payload.codeAlpha)
 })
 
-// 确定/取消：ok=true 保存配置；否则还原
-ipcMain.on('dsh:wallpaper-blur-commit', (_event, payload) => {
-  const value = Math.max(0, Math.min(100, Number(payload?.value) || 0))
+// 对话框内更换图片：弹出文件选择，即时应用到主窗口
+ipcMain.on('dsh:wallpaper-pick-image', async (_event) => {
+  const win = mainWindow
+  const dlg = blurDialog
+  if (win === null || win.isDestroyed() || dlg === null || dlg.isDestroyed()) return
+  const result = await dialog.showOpenDialog(win, {
+    title: '选择壁纸图片',
+    properties: ['openFile'],
+    filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }],
+  })
+  if (result.canceled || result.filePaths.length === 0) return
+  const file = result.filePaths[0]
+  imageDraft = file
+  try {
+    await setWallpaperLayer(win, wallpaperDataUrl(file))
+    log(`wallpaper preview: ${file}`)
+  } catch (error) {
+    log('wallpaper preview failed:', String(error))
+  }
+  dlg.webContents.send('dsh:wallpaper-image-chosen', file)
+})
+
+// 对话框内清除图片：即时隐藏
+ipcMain.on('dsh:wallpaper-clear-image', async () => {
+  const win = mainWindow
+  const dlg = blurDialog
+  if (win === null || win.isDestroyed() || dlg === null || dlg.isDestroyed()) return
+  imageDraft = null
+  try {
+    await win.webContents.executeJavaScript(`(() => {
+      const el = document.getElementById('dsh-wallpaper-layer')
+      if (el) el.style.display = 'none'
+      return !!el
+    })()`)
+    log('wallpaper preview: cleared')
+  } catch (error) {
+    log('wallpaper clear preview failed:', String(error))
+  }
+  dlg.webContents.send('dsh:wallpaper-image-chosen', null)
+})
+
+// 确定/取消：ok=true 保存全部设置（滑块当前值 + 图片草稿）；否则还原
+ipcMain.on('dsh:wallpaper-commit', (_event, payload) => {
   if (payload?.ok) {
-    saveConfig({ wallpaperBlur: value })
-    log(`wallpaper blur set: ${value}px`)
+    const cfg = {}
+    if (payload.blur !== undefined) cfg.wallpaperBlur = Math.max(0, Math.min(100, Number(payload.blur) || 0))
+    if (payload.codeAlpha !== undefined) {
+      cfg.wallpaperCodeAlpha = Math.max(0.08, Math.min(1, Number(payload.codeAlpha) || 0.45))
+    }
+    if (imageDraft === null) cfg.wallpaper = undefined
+    else cfg.wallpaper = imageDraft
+    saveConfig(cfg)
+    log(`wallpaper settings saved: blur=${cfg.wallpaperBlur ?? '?'}px codeAlpha=${cfg.wallpaperCodeAlpha ?? '?'} image=${imageDraft ?? '(none)'}`)
   } else {
-    setWallpaperBlurVar(blurOriginal)
+    restoreWallpaperState()
   }
   const dlg = blurDialog
   if (dlg !== null && !dlg.isDestroyed()) dlg.close()
+})
+
+// 主题配色 → 原生标题栏按钮颜色
+ipcMain.on('dsh:chrome-scheme', (_event, scheme) => {
+  const dark = scheme === 'dark'
+  const win = mainWindow
+  if (win === null || win.isDestroyed()) return
+  try {
+    win.setTitleBarOverlay({
+      color: dark ? '#101318' : '#ffffff',
+      symbolColor: dark ? '#e5e5ea' : '#3c3c43',
+      height: 40,
+    })
+    log(`titlebar overlay scheme=${scheme}`)
+  } catch (error) {
+    log('titlebar overlay update failed:', String(error))
+  }
 })
 
 // ---------------------------------------------------------------- 窗口 ----
@@ -612,10 +817,15 @@ function createWindow(url, wallpaper) {
     show: false,
     backgroundColor: '#101318',
     icon: iconPath(),
+    // 一体式标题栏：去掉原生标题栏，页面延伸到顶部；窗口控制按钮浮在内容上
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#101318', symbolColor: '#e5e5ea', height: 40 },
+    autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: path.join(__dirname, 'chrome-preload.js'),
     },
   })
 
@@ -642,6 +852,10 @@ function createWindow(url, wallpaper) {
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null
   })
+  win.webContents.on('render-process-gone', (_event, details) => {
+    log(`renderer gone: reason=${details.reason} exitCode=${details.exitCode}`)
+  })
+  win.on('unresponsive', () => log('window unresponsive'))
 
   // 页面内新窗口一律交给系统浏览器
   win.webContents.setWindowOpenHandler(({ url: target }) => {
@@ -667,6 +881,8 @@ function createWindow(url, wallpaper) {
     // 启动画面（file:// 壁纸页）不算 GUI 加载完成
     if (!win.webContents.getURL().startsWith(url)) return
     log(`page loaded: ${win.webContents.getURL()}`)
+    injectChromeCss(win)
+    setupTitleBar(win)
     if (wallpaper !== null) applyWallpaper(win, wallpaper)
     if (smoke) {
       const title = win.webContents.getTitle()
@@ -739,6 +955,8 @@ function createTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '显示主窗口', click: showMainWindow },
     { label: '隐藏主窗口', click: hideToTray },
+    { type: 'separator' },
+    { label: '壁纸设置…', click: () => { showMainWindow(); showWallpaperDialog() } },
     { type: 'separator' },
     { label: '在浏览器中打开', click: () => shell.openExternal(`http://${DEFAULT_HOST}:${resolvePort()}`) },
     { type: 'separator' },
@@ -833,7 +1051,7 @@ function buildMenu(runtime, url) {
       submenu: [
         { label: '在浏览器中打开', click: () => shell.openExternal(url) },
         { type: 'separator' },
-        { label: '设置壁纸…', click: () => { pickWallpaper() } },
+        { label: '壁纸设置…', click: () => { showWallpaperDialog() } },
         { label: '清除壁纸', click: () => { clearWallpaper() } },
         { type: 'separator' },
         { label: '隐藏到托盘', enabled: trayEnabled, click: () => hideToTray() },
