@@ -352,9 +352,14 @@ function injectWallpaperCss(win) {
     #root [data-slot='root'] > div > div > [data-slot] > div {
       background: var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) !important;
     }
+    /* 侧栏面板独立透明开关：--dsh-wallpaper-panel-sidebar 由 applyVars 控制 */
+    #root [data-slot='root'] > div > div:first-child > [data-slot] > div {
+      background: var(--dsh-wallpaper-panel-sidebar, var(--dsh-wallpaper-panel, rgba(255,255,255,0.55))) !important;
+    }
     /* 输入框区域：座位本身透明；::before 铺一层与主区视口对齐的壁纸
        （不透明），滚到输入框下方的聊天文字被完全盖住不显示，
-       壁纸保持连续；伪元素滤镜只模糊自身，不影响输入内容 */
+       壁纸保持连续；伪元素滤镜只模糊自身，不影响输入内容。
+       主界面不透明时 --dsh-t-composer-mask-url=none 撤销这层壁纸 */
     #root [class*='composerSeat'] {
       background: transparent !important;
     }
@@ -364,16 +369,16 @@ function injectWallpaperCss(win) {
       inset: 0 !important;
       z-index: -1 !important;
       pointer-events: none !important;
-      background-image: var(--dsh-wallpaper-url) !important;
+      background-image: var(--dsh-t-composer-mask-url, var(--dsh-wallpaper-url)) !important;
       background-position: center !important;
       background-size: cover !important;
       background-repeat: no-repeat !important;
       background-attachment: fixed !important;
       filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
     }
-    /* 侧栏"新对话"按钮：透明，壁纸透出 */
+    /* 侧栏"新对话"按钮：透明开关由 --dsh-t-new-session 控制 */
     #root [class*='newSession'] {
-      background: transparent !important;
+      background: var(--dsh-t-new-session, transparent) !important;
     }`
   wallpaperCssKey = win.webContents.insertCSS(css)
   wallpaperCssKey.catch(() => { wallpaperCssKey = null })
@@ -421,35 +426,62 @@ function applySidebarWallpaper(win) {
     .catch((error) => log('sidebar wallpaper failed:', String(error)))
 }
 
+/** 各区域透明开关（配置，默认全开）。 */
+function transparentFlags() {
+  const cfg = loadConfig()
+  return {
+    newSession: cfg.transparentNewSession !== false,
+    input: cfg.transparentInput !== false,
+    sidebar: cfg.transparentSidebar !== false,
+    main: cfg.transparentMain !== false,
+  }
+}
+
 /** 页面加载后应用壁纸：只做一次性 CSS 变量设置 + 写入壁纸 data URL。
  *  无 MutationObserver、无监听器、无探针 —— 全部是一次性赋值；
- *  代码块透明度/侧栏填充由 __dshApplyWallpaperVars() 按需手动重应用（对话框滑杆调用）。 */
+ *  代码块透明度/区域透明开关由 __dshApplyWallpaperVars() 按需手动重应用（对话框调用）。 */
 function applyWallpaper(win, wallpaper) {
   injectWallpaperCss(win)
   const dataUrl = wallpaperDataUrl(wallpaper)
   win.webContents.executeJavaScript(`(() => {
     const scheme = getComputedStyle(document.documentElement).colorScheme || 'light'
     const dark = scheme === 'dark'
-    document.documentElement.style.setProperty('--dsh-wallpaper-panel',
-      dark ? 'rgba(12,15,22,0.58)' : 'rgba(255,255,255,0.55)')
+    window.__dshWallpaperTransparent = ${JSON.stringify(transparentFlags())}
     document.documentElement.style.setProperty('--dsh-wallpaper-blur', '${wallpaperBlur()}px')
     document.documentElement.style.setProperty('--dsh-wallpaper-code-alpha', '${wallpaperCodeAlpha()}')
     const applyVars = () => {
       const isDark = document.body.hasAttribute('data-ds-dark-theme')
         || (getComputedStyle(document.documentElement).colorScheme || 'light') === 'dark'
+      const T = window.__dshWallpaperTransparent || { newSession: true, input: true, sidebar: true, main: true }
       const a = parseFloat(document.documentElement.style.getPropertyValue('--dsh-wallpaper-code-alpha'))
       const alpha = Number.isFinite(a) ? Math.max(0.08, Math.min(1, a)) : 0.45
+      const panelColor = isDark ? 'rgba(12,15,22,0.58)' : 'rgba(255,255,255,0.55)'
+      // 主界面面板：透明=半透明面板色；不透明=主题基底色
+      document.documentElement.style.setProperty('--dsh-wallpaper-panel',
+        T.main ? panelColor : 'var(--dsw-alias-bg-base)')
+      // 侧栏面板：独立开关
+      document.documentElement.style.setProperty('--dsh-wallpaper-panel-sidebar',
+        T.sidebar ? panelColor
+          : (isDark ? 'var(--dsw-static-neutral-bluish-900)' : 'var(--dsw-static-neutral-bluish-50)'))
+      // 输入框卡片（含"新会话"英雄卡片）
+      document.body.style.setProperty('--dsw-specific-input-major',
+        T.input ? 'transparent'
+          : (isDark ? 'var(--dsw-static-neutral-bluish-850)' : 'var(--dsw-static-neutral-bluish-00)'))
+      // 侧栏"新对话"按钮
+      document.documentElement.style.setProperty('--dsh-t-new-session',
+        T.newSession ? 'transparent' : 'var(--dsw-alias-button-elevated-fill)')
+      // 输入框下方的壁纸遮罩（盖住滚动文字）：主界面不透明时撤销
+      if (T.main) document.documentElement.style.removeProperty('--dsh-t-composer-mask-url')
+      else document.documentElement.style.setProperty('--dsh-t-composer-mask-url', 'none')
+      // 侧栏滚动渐隐终点色：保持透明（让背景透出），不随开关恢复
+      document.body.style.setProperty('--dsw-specific-sidebar-fill', 'transparent')
+      // 代码块/行内代码透明度
       document.body.style.setProperty('--dsw-alias-markdown-code-block',
         isDark ? 'rgba(12,15,22,' + alpha + ')' : 'rgba(255,255,255,' + alpha + ')')
       document.body.style.setProperty('--dsw-alias-markdown-code-block-banner',
         isDark ? 'rgba(20,24,34,' + alpha + ')' : 'rgba(250,251,252,' + alpha + ')')
-      // 行内代码灰底（聊天里反引号文字的浅灰背景）也跟随滑杆透明度
       document.body.style.setProperty('--dsw-alias-markdown-inline-code',
         isDark ? 'rgba(35,38,43,' + alpha + ')' : 'rgba(239,240,243,' + alpha + ')')
-      // 侧栏滚动渐隐终点色：透明，消除设置键上方的白色渐变带
-      document.body.style.setProperty('--dsw-specific-sidebar-fill', 'transparent')
-      // 文字输入框（含"新会话"英雄卡片）：透明，让壁纸透出
-      document.body.style.setProperty('--dsw-specific-input-major', 'transparent')
     }
     applyVars()
     window.__dshApplyWallpaperVars = applyVars
@@ -462,10 +494,13 @@ function applyWallpaper(win, wallpaper) {
       document.body.style.removeProperty('--dsw-specific-sidebar-fill')
       document.body.style.removeProperty('--dsw-specific-input-major')
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel')
+      document.documentElement.style.removeProperty('--dsh-wallpaper-panel-sidebar')
       document.documentElement.style.removeProperty('--dsh-wallpaper-blur')
       document.documentElement.style.removeProperty('--dsh-wallpaper-code-alpha')
+      document.documentElement.style.removeProperty('--dsh-t-new-session')
+      document.documentElement.style.removeProperty('--dsh-t-composer-mask-url')
     }
-    return JSON.stringify({ scheme, blur: ${wallpaperBlur()}, codeAlpha: ${wallpaperCodeAlpha()} })
+    return JSON.stringify({ scheme, blur: ${wallpaperBlur()}, codeAlpha: ${wallpaperCodeAlpha()}, transparent: ${JSON.stringify(transparentFlags())} })
   })()`).then((state) => {
     log('wallpaper applied: ' + state)
   }).catch((error) => log('wallpaper scheme detection failed:', String(error)))
@@ -547,8 +582,9 @@ function configuredWallpaper() {
 
 /** 构建壁纸设置对话框的 HTML（DSH 暗色风格，与关闭对话框一致）。
  *  @param blur 当前模糊值；@param codeAlpha 当前代码块透明度；@param image 当前壁纸路径或 null；
- *  @param sidebarImage 侧栏独立壁纸路径或 null（null = 共用主壁纸） */
-function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage) {
+ *  @param sidebarImage 侧栏独立壁纸路径或 null（null = 共用主壁纸）；
+ *  @param flags 各区域透明开关 {newSession,input,sidebar,main} */
+function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags) {
   const imageName = image === null ? '（无）' : path.basename(image)
   const sidebarName = sidebarImage === null ? '（无）' : path.basename(sidebarImage)
   const alphaPct = Math.round(codeAlpha * 100)
@@ -601,6 +637,10 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage) {
   .segbtn.on { background: rgba(77,107,254,.18); border-color: var(--accent); color: var(--accent); }
   .segbtn:hover { background: var(--hover-bg); }
   .segbtn.on:hover { background: rgba(77,107,254,.26); }
+  .checks { display: flex; flex-wrap: wrap; gap: 6px 14px; flex: 1; min-width: 0; }
+  .check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
+           color: var(--label-secondary); cursor: pointer; white-space: nowrap; }
+  .check input { accent-color: var(--accent); width: 13px; height: 13px; margin: 0; cursor: pointer; }
   .footer { margin-top: auto; display: flex; justify-content: flex-end; align-items: center;
             gap: 10px; padding: 16px 20px 18px; }
   .btn {
@@ -651,6 +691,15 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage) {
         <span class="val" id="alphaval">${alphaPct}%</span>
       </div>
       <div class="desc" style="margin-top:6px;padding-left:104px">数值越大越不透明（越实）。</div>
+      <div class="row" style="margin-top:14px">
+        <span class="label">透明区域</span>
+        <div class="checks">
+          <label class="check"><input type="checkbox" id="tNew" ${flags.newSession ? 'checked' : ''}><span>新对话</span></label>
+          <label class="check"><input type="checkbox" id="tInput" ${flags.input ? 'checked' : ''}><span>输入框</span></label>
+          <label class="check"><input type="checkbox" id="tSide" ${flags.sidebar ? 'checked' : ''}><span>左边栏</span></label>
+          <label class="check"><input type="checkbox" id="tMain" ${flags.main ? 'checked' : ''}><span>主界面</span></label>
+        </div>
+      </div>
     </div>
     <div class="footer">
       <button class="btn btn-ghost" id="reset">恢复默认</button>
@@ -678,13 +727,20 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage) {
     }
     modeShared.addEventListener('click', () => setMode(false))
     modeSep.addEventListener('click', () => setMode(true))
+    const tFlags = () => ({
+      newSession: document.getElementById('tNew').checked,
+      input: document.getElementById('tInput').checked,
+      sidebar: document.getElementById('tSide').checked,
+      main: document.getElementById('tMain').checked,
+    })
     const preview = () => {
       blurVal.textContent = blurEl.value + 'px'
       alphaVal.textContent = alphaEl.value + '%'
-      api.preview({ blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100 })
+      api.preview({ blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags() })
     }
     blurEl.addEventListener('input', preview)
     alphaEl.addEventListener('input', preview)
+    document.querySelectorAll('.checks input').forEach((el) => el.addEventListener('change', preview))
     document.getElementById('pick').addEventListener('click', () => api.pickImage())
     document.getElementById('clearimg').addEventListener('click', () => api.clearImage())
     document.getElementById('sidepick').addEventListener('click', () => api.pickSidebarImage())
@@ -700,10 +756,10 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage) {
       blurEl.value = 18; alphaEl.value = 45; preview()
     })
     document.getElementById('cancel').addEventListener('click', () => api.commit({ ok: false }))
-    document.getElementById('ok').addEventListener('click', () => api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100 }))
+    document.getElementById('ok').addEventListener('click', () => api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags() }))
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') api.commit({ ok: false })
-      else if (event.key === 'Enter') api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100 })
+      else if (event.key === 'Enter') api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags() })
     })
     preview()
   </script>
@@ -719,6 +775,7 @@ let imageOriginal = null
 let imageDraft = null // 对话框内更换后的主壁纸路径（null 表示无）
 let sidebarOriginal = null // 对话框打开时的侧栏壁纸（null = 共用主图）
 let sidebarDraft = null // 对话框内侧栏壁纸草稿（null = 共用主图）
+let transparentOriginal = null // 对话框打开时的透明开关
 
 /** 恢复对话框打开前的壁纸状态（取消时）。 */
 function restoreWallpaperState() {
@@ -728,6 +785,13 @@ function restoreWallpaperState() {
   setCodeAlphaVar(codeOriginal)
   setSidebarWallpaperLayer(win, sidebarOriginal === null ? null : wallpaperDataUrl(sidebarOriginal))
     .catch((error) => log('sidebar restore failed:', String(error)))
+  if (transparentOriginal !== null) {
+    win.webContents.executeJavaScript(`(() => {
+      window.__dshWallpaperTransparent = ${JSON.stringify(transparentOriginal)}
+      if (typeof window.__dshApplyWallpaperVars === 'function') window.__dshApplyWallpaperVars()
+      return true
+    })()`).catch(() => {})
+  }
   if (imageOriginal === null) {
     win.webContents.executeJavaScript(`(() => {
       const el = document.getElementById('dsh-wallpaper-layer')
@@ -756,9 +820,10 @@ function showWallpaperDialog() {
   imageDraft = imageOriginal
   sidebarOriginal = configuredSidebarWallpaper()
   sidebarDraft = sidebarOriginal
+  transparentOriginal = transparentFlags()
   const dlg = new BrowserWindow({
     width: 420,
-    height: 420,
+    height: 470,
     show: false,
     frame: false,
     // 同关闭对话框：不透明窗口（Windows 透明窗口有输入问题）
@@ -782,14 +847,32 @@ function showWallpaperDialog() {
   dlg.on('closed', () => {
     blurDialog = null
   })
-  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal))}`)
+  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal, transparentOriginal))}`)
 }
 
-// 滑块实时预览（模糊 + 代码块透明度）
+// 滑块/开关实时预览（模糊 + 代码块透明度 + 区域透明开关）
 ipcMain.on('dsh:wallpaper-preview', (_event, payload) => {
   if (payload?.blur !== undefined) setWallpaperBlurVar(payload.blur)
   if (payload?.codeAlpha !== undefined) setCodeAlphaVar(payload.codeAlpha)
+  if (payload?.transparent !== undefined) setTransparentFlags(payload.transparent)
 })
+
+/** 把区域透明开关写入页面并即时重应用（对话框预览用）。 */
+function setTransparentFlags(flags) {
+  const win = mainWindow
+  if (win === null || win.isDestroyed()) return
+  const value = {
+    newSession: flags.newSession !== false,
+    input: flags.input !== false,
+    sidebar: flags.sidebar !== false,
+    main: flags.main !== false,
+  }
+  win.webContents.executeJavaScript(`(() => {
+    window.__dshWallpaperTransparent = ${JSON.stringify(value)}
+    if (typeof window.__dshApplyWallpaperVars === 'function') window.__dshApplyWallpaperVars()
+    return true
+  })()`).catch(() => {})
+}
 
 // 对话框内更换图片：弹出文件选择，即时应用到主窗口
 ipcMain.on('dsh:wallpaper-pick-image', async (_event) => {
@@ -897,8 +980,15 @@ ipcMain.on('dsh:wallpaper-commit', (_event, payload) => {
     else cfg.wallpaper = imageDraft
     if (sidebarDraft === null) cfg.sidebarWallpaper = undefined
     else cfg.sidebarWallpaper = sidebarDraft
+    if (payload.transparent !== undefined) {
+      cfg.transparentNewSession = payload.transparent.newSession !== false
+      cfg.transparentInput = payload.transparent.input !== false
+      cfg.transparentSidebar = payload.transparent.sidebar !== false
+      cfg.transparentMain = payload.transparent.main !== false
+    }
     saveConfig(cfg)
-    log(`wallpaper settings saved: blur=${cfg.wallpaperBlur ?? '?'}px codeAlpha=${cfg.wallpaperCodeAlpha ?? '?'} image=${imageDraft ?? '(none)'} sidebar=${sidebarDraft ?? '(shared)'}`)
+    const T = payload.transparent
+    log(`wallpaper settings saved: blur=${cfg.wallpaperBlur ?? '?'}px codeAlpha=${cfg.wallpaperCodeAlpha ?? '?'} image=${imageDraft ?? '(none)'} sidebar=${sidebarDraft ?? '(shared)'} transparent=${T ? `${T.newSession}/${T.input}/${T.sidebar}/${T.main}` : '?'}`)
   } else {
     restoreWallpaperState()
   }
