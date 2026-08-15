@@ -206,11 +206,21 @@ function startServer(runtime, port) {
   child.on('exit', (code, signal) => {
     log(`backend exited: code=${code} signal=${String(signal)}`)
     serverChild = null
-    // 主动终止（退出/冒烟测试）不视为意外退出；只有自己拉起的后端崩溃才弹窗
+    // 主动终止（退出/冒烟测试）不视为意外退出；只有自己拉起的后端崩溃才处理
     if (!quitting && !serverExternal && !intentionalKill) {
-      dialog.showErrorBox(APP_NAME,
-        `DSH 后端进程意外退出（code=${code}）。\n日志：${logFile('dsh-web.err.log')}`)
-      app.quit()
+      // 常见原因是端口被本机其他 GUI 服务抢占（EADDRINUSE）：先探测端口，
+      // 若已有服务在响应就转为挂接模式继续用，而不是退出
+      const url = `http://${DEFAULT_HOST}:${port}`
+      probe(url).then((alive) => {
+        if (alive) {
+          log('port taken over by another server, attaching (server not owned by this app)')
+          serverExternal = true
+        } else {
+          dialog.showErrorBox(APP_NAME,
+            `DSH 后端进程意外退出（code=${code}）。\n日志：${logFile('dsh-web.err.log')}`)
+          app.quit()
+        }
+      })
     }
   })
   return child
@@ -326,11 +336,15 @@ function injectWallpaperCss(win) {
       background-image: var(--dsh-wallpaper-url) !important;
       filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
     }
-    /* 左侧栏区域：更糊 1.6 倍（盖在 ::before 之上）；单独设置时用独立图，否则沿用主图 */
+    /* 左侧栏区域：更糊 1.6 倍（盖在 ::before 之上）。
+       共用主图时用 background-attachment: fixed —— 背景相对视口对齐，
+       侧栏显示的就是主图同一位置（一整张连续图，不出现第二份裁切）；
+       单独设置时 attachment 为 scroll，按侧栏区域裁切自己的图 */
     body::after {
       left: 0 !important;
       width: var(--dsh-sidebar-w, 280px) !important;
       background-image: var(--dsh-wallpaper-url-sidebar, var(--dsh-wallpaper-url)) !important;
+      background-attachment: var(--dsh-sidebar-attachment, fixed) !important;
       filter: blur(calc(var(--dsh-wallpaper-blur, 18px) * 1.6)) !important;
     }
     #root [data-slot='root'] > div,
@@ -363,8 +377,11 @@ function setWallpaperLayer(win, dataUrl) {
 /** 设置/清除侧栏独立壁纸（dataUrl 为 null 时清除，侧栏回落共用主壁纸）。 */
 function setSidebarWallpaperLayer(win, dataUrl) {
   const expr = dataUrl === null
-    ? `document.body.style.removeProperty('--dsh-wallpaper-url-sidebar'); return '(cleared)'`
+    ? `document.body.style.removeProperty('--dsh-wallpaper-url-sidebar');
+       document.body.style.removeProperty('--dsh-sidebar-attachment');
+       return '(cleared)'`
     : `document.body.style.setProperty('--dsh-wallpaper-url-sidebar', "url('${dataUrl}')");
+       document.body.style.setProperty('--dsh-sidebar-attachment', 'scroll');
        return document.body.style.getPropertyValue('--dsh-wallpaper-url-sidebar').slice(0, 40)`
   return win.webContents.executeJavaScript(`(() => { ${expr} })()`)
 }
@@ -940,6 +957,8 @@ function createWindow(url, wallpaper) {
     // 启动画面（file:// 壁纸页）不算 GUI 加载完成
     if (!win.webContents.getURL().startsWith(url)) return
     log(`page loaded: ${win.webContents.getURL()}`)
+    // 页面重载后 insertCSS 的 key 失效，必须重置才能重新注入
+    wallpaperCssKey = null
     if (wallpaper !== null) applyWallpaper(win, wallpaper)
     applySidebarWallpaper(win)
     if (smoke) {
