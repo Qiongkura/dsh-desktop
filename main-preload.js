@@ -58,10 +58,10 @@ const tryInject = () => {
     setTimeout(tryInject, 5)
     return
   }
+  // 启动层盖在最顶层（z-index 最大）：主界面在下面加载但不可见，
+  // 展示满 minMs（或主界面就绪且 minMs=0）后移除，主界面才出现。
   const isVideo = payload.isVideo === true || /\.(mp4|m4v|webm|mov|ogv)(\?|#|$)/i.test(media)
   if (isVideo) {
-    // 视频：注入 <video> 壁纸层（CSS 背景不能渲染视频）。
-    // 不加 !important，主界面加载后由主进程机制接管（本元素会被移除）。
     const v = document.createElement('video')
     v.id = 'dsh-wallpaper-boot'
     v.src = media
@@ -69,33 +69,18 @@ const tryInject = () => {
     v.loop = true
     v.muted = true
     v.playsInline = true
-    v.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1;pointer-events:none'
+    v.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:2147483647'
     document.documentElement.appendChild(v)
   } else {
-    // 图片：注入壁纸背景 CSS（无 !important，主界面机制可覆盖接管）
-    const style = document.createElement('style')
-    style.id = 'dsh-wallpaper-boot'
-    style.textContent = `
-      html { background: ${bg}; }
-      body { background: transparent; }
-      body::before {
-        content: '';
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        z-index: -1;
-        pointer-events: none;
-        background: url('${media}') center/cover no-repeat;
-        filter: blur(${blur}px);
-      }
-    `
-    document.documentElement.appendChild(style)
+    // 图片：全屏 div，背景先主色（加载期无黑），图片就绪后覆盖
+    const d = document.createElement('div')
+    d.id = 'dsh-wallpaper-boot'
+    d.style.cssText = `position:fixed;inset:0;z-index:2147483647;background:${bg} center/cover no-repeat;background-image:url('${media}');filter:blur(${blur}px)`
+    document.documentElement.appendChild(d)
   }
   report('WALLPAPER_BOOT_INJECTED')
   // 主界面渲染完成（输入框出现）且至少展示 minMs 后移除启动层；
-  // 20s 超时兜底。主进程 did-finish-load 不再提前移除（时长>0 时媒体要播满）。
+  // 20s 超时兜底。
   const start = Date.now()
   let tries = 0
   const iv = setInterval(() => {
