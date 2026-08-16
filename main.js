@@ -348,8 +348,8 @@ function handleWallpaperProtocol(request) {
  *    follow    跟随主界面壁纸（图片 data URL；视频走 dsh-wallpaper://）
  *    custom    自定义素材（splashFile：图片或视频，按扩展名自动识别） */
 function showSplash(win, wallpaper) {
+  const mode = splashMode()
   const cfg = loadConfig()
-  const mode = cfg.splashMode === 'follow' || cfg.splashMode === 'custom' ? cfg.splashMode : 'default'
   let media = null
   let isVideo = false
   const custom = cfg.splashFile && fs.existsSync(cfg.splashFile) ? path.resolve(cfg.splashFile) : null
@@ -412,10 +412,13 @@ function panelAlpha() {
   return Number.isFinite(n) && n >= 0 && n <= 1 ? n : 0.55
 }
 
-/** 启动画面模式：default / follow / custom（自定义图片或视频），默认 default。 */
+/** 启动画面模式：default / follow / custom（自定义图片或视频），默认 default。
+ *  兼容旧版本保存的 image / animation（合并为 custom）。 */
 function splashMode() {
   const mode = loadConfig().splashMode
-  return mode === 'follow' || mode === 'custom' ? mode : 'default'
+  if (mode === 'follow' || mode === 'custom') return mode
+  if (mode === 'image' || mode === 'animation') return 'custom'
+  return 'default'
 }
 
 /** 启动画面自定义素材（图片或动画视频），不存在返回 null。 */
