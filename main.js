@@ -424,42 +424,14 @@ function injectWallpaperCss(win) {
     #root [data-slot='root'] > div > div:first-child > [data-slot] > div {
       background: var(--dsh-wallpaper-panel-sidebar, var(--dsh-wallpaper-panel, rgba(255,255,255,0.55))) !important;
     }
-    /* 输入框区域：座位本身透明；::before 铺一层与主区视口对齐的壁纸
-       （不透明），滚到输入框下方的聊天文字被完全盖住不显示，
-       壁纸保持连续；伪元素滤镜只模糊自身，不影响输入内容。
-       液态玻璃只在输入卡片正下方：宽度跟随卡片
-       （--dsh-composer-card-max-width，窄窗口收进两侧 16px 清空区），
-       居中、圆角与卡片一致；遮罩向上延伸 36px（文字在到达输入框前渐隐）。
-       主界面不透明时 --dsh-t-composer-mask-url=none 撤销这层壁纸 */
+    /* 输入框液态玻璃：::before 毛玻璃层（图片/视频壁纸统一生效）——
+       backdrop-filter 直接模糊后方（壁纸+滚动文字），渐变背景从透明过渡到
+       面板色，文字滚入输入区时被模糊+面板色盖住，不单独显示壁纸图。
+       只在输入卡片正下方（宽度跟随卡片），顶部 -36px 渐变丝滑过渡。 */
     #root [class*='composerSeat'] {
       background: transparent !important;
       /* 液态玻璃不贴窗口底边：输入框整体上移 12px */
       bottom: 12px !important;
-    }
-    /* 视频壁纸毛玻璃：backdrop-filter 直接模糊 <video> 背景，
-       渐变背景从透明过渡到面板色，遮住滚动文字；
-       同样只在输入卡片正下方（宽度跟随卡片） */
-    body.dsh-video-wallpaper #root [class*='composerSeat'] {
-      background: transparent !important;
-      backdrop-filter: none !important;
-    }
-    body.dsh-video-wallpaper #root [class*='composerSeat']::after {
-      content: '' !important;
-      position: absolute !important;
-      top: 0 !important;
-      bottom: 0 !important;
-      left: 50% !important;
-      right: auto !important;
-      width: min(var(--dsh-composer-card-max-width, 800px), calc(100% - 32px)) !important;
-      transform: translateX(-50%) !important;
-      border-radius: 22px !important;
-      z-index: -1 !important;
-      pointer-events: none !important;
-      background: linear-gradient(to bottom,
-        transparent 0px,
-        var(--dsh-wallpaper-panel, rgba(12,15,22,0.58)) 44px) !important;
-      backdrop-filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
-      -webkit-backdrop-filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
     }
     #root [class*='composerSeat']::before {
       content: '' !important;
@@ -473,50 +445,16 @@ function injectWallpaperCss(win) {
       border-radius: 22px !important;
       z-index: -1 !important;
       pointer-events: none !important;
-      background-image: var(--dsh-t-composer-mask-url, var(--dsh-wallpaper-url)) !important;
-      background-position: center !important;
-      background-size: cover !important;
-      background-repeat: no-repeat !important;
-      background-attachment: fixed !important;
-      filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
-      /* 座位上方渐变：一点点丝滑过渡，文字在到达输入框前就消失 */
-      -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
-      mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
+      background: linear-gradient(to bottom,
+        transparent 0px,
+        var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) 36px) !important;
+      backdrop-filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
+      -webkit-backdrop-filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
     }
-    /* 新会话(hero)界面：不渲染输入区遮罩/毛玻璃，保持全透 */
+    /* 新会话(hero)界面：不渲染输入区毛玻璃，保持全透 */
     #root [data-phase='hero'] [class*='composerSeat']::before,
     #root [data-phase='hero'] [class*='composerSeat']::after {
       display: none !important;
-    }
-    /* 侧栏底部遮罩：与主界面输入区完全同高——顶部锚定在输入区顶部
-       （--dsh-sidebar-mask-top，动态测量），底部到窗口底（贴着最底下），
-       顶部 36px 渐变；footArea 抬到遮罩之上。
-       侧栏不透明时 --dsh-sidebar-fade-url=none 撤销这层 */
-    #root [data-slot='root'] > div > div:first-child > [data-slot] > div {
-      position: relative !important;
-    }
-    #root [data-slot='root'] > div > div:first-child [class$='footArea'] {
-      position: relative !important;
-      z-index: 1 !important;
-    }
-    #root [data-slot='root'] > div > div:first-child > [data-slot] > div::after {
-      content: '' !important;
-      position: absolute !important;
-      left: 0 !important;
-      right: 0 !important;
-      top: var(--dsh-sidebar-mask-top, 740px) !important;
-      /* 贴底：玻璃底部到窗口底边 */
-      bottom: 0 !important;
-      z-index: 0 !important;
-      pointer-events: none !important;
-      background-image: var(--dsh-sidebar-fade-url, var(--dsh-wallpaper-url-sidebar, var(--dsh-wallpaper-url))) !important;
-      background-position: center !important;
-      background-size: cover !important;
-      background-repeat: no-repeat !important;
-      background-attachment: var(--dsh-sidebar-attachment, fixed) !important;
-      filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
-      -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
-      mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
     }
     /* 侧栏"新对话"按钮：透明开关由 --dsh-t-new-session 控制 */
     #root [class*='newSession'] {
@@ -570,40 +508,10 @@ function setWallpaperVideoLayer(win, file) {
     video.volume = 1
     video.src = ${JSON.stringify(src)}
     video.play().catch(() => {})
-    // 视频模式下停用图片伪元素层（避免两层叠影）
+    // 视频模式下停用图片伪元素层（避免两层叠影）；
+    // 输入框液态玻璃由统一的 ::before 毛玻璃承担（图片/视频同一套），
+    // 不再需要视频专属 CSS
     document.body.style.setProperty('--dsh-wallpaper-url', 'none')
-    // 注入视频壁纸毛玻璃 CSS（不依赖 injectWallpaperCss 的一次性注入）
-    if (!document.getElementById('dsh-video-composer-css')) {
-      const s = document.createElement('style')
-      s.id = 'dsh-video-composer-css'
-      s.textContent =
-        'body.dsh-video-wallpaper #root [class*="composerSeat"]::before { display:none !important }' +
-        'body.dsh-video-wallpaper #root [class*="composerSeat"] {' +
-        '  background:transparent !important;backdrop-filter:none !important;' +
-        '}' +
-        'body.dsh-video-wallpaper #root [class*="composerSeat"]::after {' +
-        '  content:"" !important;position:absolute !important;top:0 !important;bottom:0 !important;' +
-        '  left:50% !important;right:auto !important;' +
-        '  width:min(var(--dsh-composer-card-max-width,800px),calc(100% - 32px)) !important;' +
-        '  transform:translateX(-50%) !important;border-radius:22px !important;' +
-        '  z-index:-1 !important;pointer-events:none !important;' +
-        '  background:linear-gradient(to bottom,transparent 0px,var(--dsh-wallpaper-panel,rgba(12,15,22,0.58)) 36px) !important;' +
-        '  backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
-        '  -webkit-backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
-        '}' +
-        // 视频模式下侧栏底部遮罩：与输入框同款毛玻璃渐隐（面板 ::after 方案）
-        'body.dsh-video-wallpaper #root [data-slot="root"] > div > div:first-child [class$="footArea"] {' +
-        '  position:relative !important;z-index:1 !important;' +
-        '}' +
-        'body.dsh-video-wallpaper #root [data-slot="root"] > div > div:first-child > [data-slot] > div::after {' +
-        '  content:"" !important;position:absolute !important;left:0 !important;right:0 !important;' +
-        '  top:var(--dsh-sidebar-mask-top,740px) !important;bottom:0 !important;z-index:0 !important;pointer-events:none !important;' +
-        '  background:linear-gradient(to bottom,transparent 0px,var(--dsh-wallpaper-panel,rgba(12,15,22,0.58)) 36px) !important;' +
-        '  backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
-        '  -webkit-backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
-        '}'
-      document.head.appendChild(s)
-    }
     document.body.classList.add('dsh-video-wallpaper')
     return 'video:' + ${JSON.stringify(src)}
   })()`)
@@ -635,7 +543,7 @@ function clearWallpaperVideoLayer(win) {
       video.removeAttribute('src')
       video.remove()
     }
-    // 关闭输入框毛玻璃（回到图片壁纸的 ::before 方案）
+    // 移除视频壁纸标记（液态玻璃统一由 ::before 承担，无需专属 CSS）
     document.body.classList.remove('dsh-video-wallpaper')
     const css = document.getElementById('dsh-video-composer-css')
     if (css) css.remove()
@@ -650,10 +558,7 @@ function applyWallpaperFile(win, file) {
     return setWallpaperVideoLayer(win, file)
   }
   clearWallpaperVideoLayer(win).catch(() => {})
-  // 从视频切回图片时，清除视频截帧残留，让 composer mask 回退到 --dsh-wallpaper-url
-  return win.webContents.executeJavaScript(
-    `document.body.style.removeProperty('--dsh-t-composer-mask-url')`
-  ).then(() => setWallpaperLayer(win, wallpaperDataUrl(file)))
+  return setWallpaperLayer(win, wallpaperDataUrl(file))
 }
 
 /** 当前侧栏壁纸路径（配置，未单独设置时为 null）。 */
@@ -783,24 +688,6 @@ function applyWallpaper(win, wallpaper) {
       // 侧栏"新对话"按钮
       document.body.style.setProperty('--dsh-t-new-session',
         T.newSession ? 'transparent' : 'var(--dsw-alias-button-elevated-fill)')
-      // 输入框下方的壁纸遮罩（盖住滚动文字）：主界面不透明时撤销
-      // 视频壁纸通过 body.dsh-video-wallpaper + backdrop-filter 实现毛玻璃，不依赖此变量
-      if (T.main) document.body.style.removeProperty('--dsh-t-composer-mask-url')
-      else document.body.style.setProperty('--dsh-t-composer-mask-url', 'none')
-      // 侧栏底部壁纸遮挡层：侧栏不透明时撤销；
-      // 顶部锚定 = 主界面输入区顶部 - 36px 渐变区（与输入区同一高度范围）
-      if (T.sidebar) document.body.style.removeProperty('--dsh-sidebar-fade-url')
-      else document.body.style.setProperty('--dsh-sidebar-fade-url', 'none')
-      // 侧栏遮罩顶部锚定 = 主界面输入区顶部 - 36px 渐变区；
-      // 新会话(hero)界面隐藏遮罩（锚点推到视口底部 => 零高度）
-      const hero = document.querySelector('[data-phase="hero"]') !== null
-      const seat = document.querySelector('[class*="composerSeat"]')
-      if (hero) {
-        document.body.style.setProperty('--dsh-sidebar-mask-top', '100vh')
-      } else if (seat !== null) {
-        const top = seat.getBoundingClientRect().top
-        document.body.style.setProperty('--dsh-sidebar-mask-top', (top - 36) + 'px')
-      }
       // 侧栏滚动渐隐终点色：保持透明（让背景透出），不随开关恢复
       document.body.style.setProperty('--dsw-specific-sidebar-fill', 'transparent')
       // 代码块/行内代码透明度
@@ -813,37 +700,7 @@ function applyWallpaper(win, wallpaper) {
     }
     applyVars()
     window.__dshApplyWallpaperVars = applyVars
-    // 窗口尺寸/输入区变化时重新对齐侧栏遮罩；输入区晚渲染时延迟重试
-    window.__dshResyncMask = () => {
-      const hero = document.querySelector('[data-phase="hero"]') !== null
-      const seat = document.querySelector('[class*="composerSeat"]')
-      if (hero) {
-        document.body.style.setProperty('--dsh-sidebar-mask-top', '100vh')
-      } else if (seat !== null) {
-        const top = seat.getBoundingClientRect().top
-        document.body.style.setProperty('--dsh-sidebar-mask-top', (top - 36) + 'px')
-      }
-    }
-    window.addEventListener('resize', window.__dshResyncMask)
-    // 会话阶段(hero/active/settling)切换时重新对齐侧栏遮罩：
-    // 新会话界面立即隐藏，回到会话界面立即恢复贴底
-    const phaseObserver = new MutationObserver(() => {
-      if (typeof window.__dshResyncMask === 'function') window.__dshResyncMask()
-    })
-    phaseObserver.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-phase'] })
-    window.__dshPhaseObserver = phaseObserver
-    setTimeout(window.__dshResyncMask, 1000)
-    setTimeout(window.__dshResyncMask, 3000)
-    setTimeout(window.__dshResyncMask, 6000)
     window.__dshWallpaperCleanup = () => {
-      if (window.__dshPhaseObserver) {
-        window.__dshPhaseObserver.disconnect()
-        window.__dshPhaseObserver = null
-      }
-      if (typeof window.__dshResyncMask === 'function') {
-        window.removeEventListener('resize', window.__dshResyncMask)
-        window.__dshResyncMask = null
-      }
       document.body.style.removeProperty('--dsh-wallpaper-url')
       document.body.classList.remove('dsh-video-wallpaper')
       const css = document.getElementById('dsh-video-composer-css')
