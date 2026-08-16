@@ -22,12 +22,13 @@
  *  --smoke-test        加载完成后打印 SMOKE_OK/SMOKE_FAIL 并退出（自动化验证用）
  */
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, protocol, shell, Tray } = require('electron')
 const { spawn, execFile, execFileSync } = require('node:child_process')
 const http = require('node:http')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const { Readable } = require('node:stream')
 
 const APP_NAME = 'DeepSeek Harness Desktop'
 const DEFAULT_HOST = '127.0.0.1'
@@ -275,12 +276,80 @@ function wallpaperDataUrl(file) {
   return `data:${mime};base64,${fs.readFileSync(file).toString('base64')}`
 }
 
-/** 生成启动画面（加载 GUI 前显示壁纸），写入 userData 后 loadFile。 */
+// ------------------------------------------------------------ 视频壁纸 ----
+
+/** 支持的视频壁纸扩展名 → MIME。Chromium 内核可解 mp4(h264)/webm/mov/ogv。 */
+const WALLPAPER_VIDEO_MIME = {
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.ogv': 'video/ogg',
+}
+
+/** 判断壁纸文件是否为视频。 */
+function isVideoWallpaper(file) {
+  return WALLPAPER_VIDEO_MIME[path.extname(file).toLowerCase()] !== undefined
+}
+
+/**
+ * 注册 dsh-wallpaper:// 特权协议（须在 app ready 前调用）。
+ * 协议把文件系统路径映射为可流式播放的 URL（http 页面不能直接加载
+ * file:// 视频），并支持 Range 请求（<video> seek 需要）。
+ */
+function registerWallpaperProtocol() {
+  protocol.registerSchemesAsPrivileged([{
+    scheme: 'dsh-wallpaper',
+    privileges: { stream: true, supportFetchAPI: true, bypassCSP: true },
+  }])
+}
+
+/** 视频壁纸 URL：dsh-wallpaper://local/<绝对路径>。 */
+function wallpaperVideoUrl(file) {
+  const abs = path.resolve(file)
+  return `dsh-wallpaper://local/${encodeURIComponent(abs)}`
+}
+
+/** 处理 dsh-wallpaper:// 请求：读本地文件并响应（含 Range 支持）。 */
+function handleWallpaperProtocol(request) {
+  try {
+    const url = new URL(request.url)
+    if (url.hostname !== 'local') return new Response('not found', { status: 404 })
+    const file = decodeURIComponent(url.pathname.slice(1))
+    const mime = WALLPAPER_VIDEO_MIME[path.extname(file).toLowerCase()]
+    if (mime === undefined || !fs.existsSync(file)) return new Response('not found', { status: 404 })
+    const stat = fs.statSync(file)
+    const range = request.headers.get('range')
+    const headers = { 'content-type': mime, 'accept-ranges': 'bytes', 'cache-control': 'no-store' }
+    if (range !== null) {
+      const match = /bytes=(\d*)-(\d*)/.exec(range)
+      if (match !== null) {
+        const start = match[1] === '' ? 0 : Number(match[1])
+        const end = match[2] === '' ? stat.size - 1 : Math.min(Number(match[2]), stat.size - 1)
+        if (Number.isFinite(start) && Number.isFinite(end) && start <= end && end < stat.size) {
+          headers['content-range'] = `bytes ${start}-${end}/${stat.size}`
+          headers['content-length'] = String(end - start + 1)
+          return new Response(Readable.toWeb(fs.createReadStream(file, { start, end })), {
+            status: 206, headers,
+          })
+        }
+      }
+    }
+    headers['content-length'] = String(stat.size)
+    return new Response(Readable.toWeb(fs.createReadStream(file)), { status: 200, headers })
+  } catch {
+    return new Response('error', { status: 500 })
+  }
+}
+
+/** 生成启动画面（加载 GUI 前显示壁纸），写入 userData 后 loadFile。
+ *  视频壁纸无法塞进 data URL，启动画面退化为品牌色底（保持轻量）。 */
 function showSplash(win, wallpaper) {
-  const dataUrl = wallpaperDataUrl(wallpaper)
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+  const isVideo = wallpaper !== null && isVideoWallpaper(wallpaper)
+  const dataUrl = wallpaper === null || isVideo ? null : wallpaperDataUrl(wallpaper)
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title></title><style>
     html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#101318}
-    .wall{position:fixed;inset:0;background:url('${dataUrl}') center/cover no-repeat}
+    .wall{position:fixed;inset:0;${dataUrl === null ? '' : `background:url('${dataUrl}') center/cover no-repeat`}}
     .shade{position:fixed;inset:0;background:linear-gradient(to top,rgba(8,10,16,.55),transparent 45%)}
     .brand{position:fixed;left:28px;bottom:22px;color:#fff;font:600 20px/1.3 "Segoe UI",system-ui,sans-serif;opacity:.92}
     .brand small{display:block;font:400 12px/1.4 "Segoe UI",system-ui,sans-serif;opacity:.65}
@@ -364,10 +433,19 @@ function injectWallpaperCss(win) {
     #root [class*='composerSeat'] {
       background: transparent !important;
     }
+    /* 视频壁纸毛玻璃：backdrop-filter 直接模糊 <video> 背景，
+       渐变背景从透明过渡到面板色，遮住滚动文字 */
+    body.dsh-video-wallpaper #root [class*='composerSeat'] {
+      background: linear-gradient(to bottom,
+        transparent 0px,
+        var(--dsh-wallpaper-panel, rgba(12,15,22,0.58)) 44px) !important;
+      backdrop-filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
+      -webkit-backdrop-filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
+    }
     #root [class*='composerSeat']::before {
       content: '' !important;
       position: absolute !important;
-      inset: -44px 0 0 0 !important;
+      inset: 0 !important;
       z-index: -1 !important;
       pointer-events: none !important;
       background-image: var(--dsh-t-composer-mask-url, var(--dsh-wallpaper-url)) !important;
@@ -376,10 +454,6 @@ function injectWallpaperCss(win) {
       background-repeat: no-repeat !important;
       background-attachment: fixed !important;
       filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
-      /* 顶部 44px 渐入（在座位上方）：文字在卡片上方逐渐隐去，
-         壁纸边缘与主区自然衔接，不生硬截断 */
-      -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 44px) !important;
-      mask-image: linear-gradient(to bottom, transparent 0px, black 44px) !important;
     }
     /* 侧栏底部：把原 24px 主题渐隐层改为壁纸遮挡层——
        会话列表滚到底部时，文字在顶部 32px 渐变区渐隐，
@@ -419,16 +493,101 @@ function setWallpaperLayer(win, dataUrl) {
   })()`)
 }
 
-/** 设置/清除侧栏独立壁纸（dataUrl 为 null 时清除，侧栏回落共用主壁纸）。 */
-function setSidebarWallpaperLayer(win, dataUrl) {
-  const expr = dataUrl === null
-    ? `document.body.style.removeProperty('--dsh-wallpaper-url-sidebar');
-       document.body.style.removeProperty('--dsh-sidebar-attachment');
-       return '(cleared)'`
-    : `document.body.style.setProperty('--dsh-wallpaper-url-sidebar', "url('${dataUrl}')");
-       document.body.style.setProperty('--dsh-sidebar-attachment', 'scroll');
-       return document.body.style.getPropertyValue('--dsh-wallpaper-url-sidebar').slice(0, 40)`
-  return win.webContents.executeJavaScript(`(() => { ${expr} })()`)
+/** 视频壁纸是否播放声音（配置，默认静音）。 */
+function wallpaperVideoSound() {
+  return loadConfig().wallpaperVideoSound === true
+}
+
+/**
+ * 应用视频壁纸：注入/更新一个铺满全屏的 <video> 背景层。
+ * 视频不能作为 CSS background-image，所以用真实元素（fixed、负 z-index、
+ * 不接收指针事件），模糊通过 CSS filter 施加在视频元素自身。
+ */
+function setWallpaperVideoLayer(win, file) {
+  const src = wallpaperVideoUrl(file)
+  const sound = wallpaperVideoSound()
+  return win.webContents.executeJavaScript(`(() => {
+    let video = document.getElementById('dsh-wallpaper-video')
+    if (video === null) {
+      video = document.createElement('video')
+      video.id = 'dsh-wallpaper-video'
+      video.setAttribute('autoplay', '')
+      video.setAttribute('loop', '')
+      video.setAttribute('playsinline', '')
+      video.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;'
+        + 'object-fit:cover;z-index:-2;pointer-events:none;'
+        + 'filter:blur(var(--dsh-wallpaper-blur,18px));'
+      document.body.appendChild(video)
+    }
+    video.muted = ${sound ? 'false' : 'true'}
+    video.volume = 1
+    video.src = ${JSON.stringify(src)}
+    video.play().catch(() => {})
+    // 视频模式下停用图片伪元素层（避免两层叠影）
+    document.body.style.setProperty('--dsh-wallpaper-url', 'none')
+    // 注入视频壁纸毛玻璃 CSS（不依赖 injectWallpaperCss 的一次性注入）
+    if (!document.getElementById('dsh-video-composer-css')) {
+      const s = document.createElement('style')
+      s.id = 'dsh-video-composer-css'
+      s.textContent =
+        'body.dsh-video-wallpaper #root [class*="composerSeat"]::before { display:none !important }' +
+        'body.dsh-video-wallpaper #root [class*="composerSeat"] {' +
+        '  background:linear-gradient(to bottom,transparent 0px,var(--dsh-wallpaper-panel,rgba(12,15,22,0.58)) 44px) !important;' +
+        '  backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
+        '  -webkit-backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
+        '}'
+      document.head.appendChild(s)
+    }
+    document.body.classList.add('dsh-video-wallpaper')
+    return 'video:' + ${JSON.stringify(src)}
+  })()`)
+}
+
+/** 实时切换视频壁纸声音（对话框预览用）：主壁纸与侧栏视频层都生效。 */
+function setWallpaperVideoSoundLive(win, enabled) {
+  return win.webContents.executeJavaScript(`(() => {
+    const sound = ${enabled ? 'true' : 'false'}
+    let touched = 0
+    for (const id of ['dsh-wallpaper-video', 'dsh-wallpaper-video-sidebar']) {
+      const video = document.getElementById(id)
+      if (video !== null) {
+        video.muted = !sound
+        if (sound) video.volume = 1
+        touched += 1
+      }
+    }
+    return 'sound:' + sound + ' videos:' + touched
+  })()`)
+}
+
+/** 移除视频壁纸层（回到图片/无壁纸状态）。 */
+function clearWallpaperVideoLayer(win) {
+  return win.webContents.executeJavaScript(`(() => {
+    const video = document.getElementById('dsh-wallpaper-video')
+    if (video !== null) {
+      video.pause()
+      video.removeAttribute('src')
+      video.remove()
+    }
+    // 关闭输入框毛玻璃（回到图片壁纸的 ::before 方案）
+    document.body.classList.remove('dsh-video-wallpaper')
+    const css = document.getElementById('dsh-video-composer-css')
+    if (css) css.remove()
+    return video !== null ? 'removed' : 'absent'
+  })()`)
+}
+
+/** 应用壁纸文件（图片或视频自动分派）。 */
+function applyWallpaperFile(win, file) {
+  if (isVideoWallpaper(file)) {
+    clearWallpaperVideoLayer(win).catch(() => {})
+    return setWallpaperVideoLayer(win, file)
+  }
+  clearWallpaperVideoLayer(win).catch(() => {})
+  // 从视频切回图片时，清除视频截帧残留，让 composer mask 回退到 --dsh-wallpaper-url
+  return win.webContents.executeJavaScript(
+    `document.body.style.removeProperty('--dsh-t-composer-mask-url')`
+  ).then(() => setWallpaperLayer(win, wallpaperDataUrl(file)))
 }
 
 /** 当前侧栏壁纸路径（配置，未单独设置时为 null）。 */
@@ -439,11 +598,68 @@ function configuredSidebarWallpaper() {
   return null
 }
 
+/**
+ * 应用侧栏独立壁纸文件（图片/视频自动分派）。
+ * 视频：注入一个只覆盖侧栏宽度的 <video> 层（左缘对齐、负 z-index）。
+ */
+function setSidebarWallpaperFile(win, file) {
+  if (isVideoWallpaper(file)) {
+    const src = wallpaperVideoUrl(file)
+    const sound = wallpaperVideoSound()
+    return win.webContents.executeJavaScript(`(() => {
+      let video = document.getElementById('dsh-wallpaper-video-sidebar')
+      if (video === null) {
+        video = document.createElement('video')
+        video.id = 'dsh-wallpaper-video-sidebar'
+        video.setAttribute('autoplay', '')
+        video.setAttribute('loop', '')
+        video.setAttribute('playsinline', '')
+        video.style.cssText = 'position:fixed;top:0;left:0;height:100vh;'
+          + 'object-fit:cover;z-index:-1;pointer-events:none;'
+          + 'filter:blur(var(--dsh-wallpaper-blur,18px));'
+          + 'width:var(--dsh-sidebar-w,280px);'
+        document.body.appendChild(video)
+      }
+      video.muted = ${sound ? 'false' : 'true'}
+      video.volume = 1
+      video.src = ${JSON.stringify(src)}
+      video.play().catch(() => {})
+      return 'sidebar-video:' + ${JSON.stringify(src)}
+    })()`)
+  }
+  return win.webContents.executeJavaScript(`(() => {
+    const video = document.getElementById('dsh-wallpaper-video-sidebar')
+    if (video !== null) {
+      video.pause()
+      video.removeAttribute('src')
+      video.remove()
+    }
+    document.body.style.setProperty('--dsh-wallpaper-url-sidebar', "url('${wallpaperDataUrl(file)}')")
+    document.body.style.setProperty('--dsh-sidebar-attachment', 'scroll')
+    return 'sidebar-image'
+  })()`)
+}
+
+/** 清除侧栏独立壁纸（视频层移除 / 图片变量清除），回落共用主壁纸。 */
+function clearSidebarWallpaperLayer(win) {
+  return win.webContents.executeJavaScript(`(() => {
+    const video = document.getElementById('dsh-wallpaper-video-sidebar')
+    if (video !== null) {
+      video.pause()
+      video.removeAttribute('src')
+      video.remove()
+    }
+    document.body.style.removeProperty('--dsh-wallpaper-url-sidebar')
+    document.body.style.removeProperty('--dsh-sidebar-attachment')
+    return '(cleared)'
+  })()`)
+}
+
 /** 启动时应用侧栏壁纸（未单独设置则无操作，共用主壁纸）。 */
 function applySidebarWallpaper(win) {
   const file = configuredSidebarWallpaper()
   if (file === null) return
-  setSidebarWallpaperLayer(win, wallpaperDataUrl(file))
+  setSidebarWallpaperFile(win, file)
     .catch((error) => log('sidebar wallpaper failed:', String(error)))
 }
 
@@ -463,7 +679,8 @@ function transparentFlags() {
  *  代码块透明度/区域透明开关由 __dshApplyWallpaperVars() 按需手动重应用（对话框调用）。 */
 function applyWallpaper(win, wallpaper) {
   injectWallpaperCss(win)
-  const dataUrl = wallpaperDataUrl(wallpaper)
+  const isVideo = wallpaper !== null && isVideoWallpaper(wallpaper)
+  const dataUrl = wallpaper === null || isVideo ? null : wallpaperDataUrl(wallpaper)
   win.webContents.executeJavaScript(`(() => {
     const scheme = getComputedStyle(document.documentElement).colorScheme || 'light'
     const dark = scheme === 'dark'
@@ -501,6 +718,7 @@ function applyWallpaper(win, wallpaper) {
       document.body.style.setProperty('--dsh-t-new-session',
         T.newSession ? 'transparent' : 'var(--dsw-alias-button-elevated-fill)')
       // 输入框下方的壁纸遮罩（盖住滚动文字）：主界面不透明时撤销
+      // 视频壁纸通过 body.dsh-video-wallpaper + backdrop-filter 实现毛玻璃，不依赖此变量
       if (T.main) document.body.style.removeProperty('--dsh-t-composer-mask-url')
       else document.body.style.setProperty('--dsh-t-composer-mask-url', 'none')
       // 侧栏底部壁纸遮挡层：侧栏不透明时撤销
@@ -520,6 +738,15 @@ function applyWallpaper(win, wallpaper) {
     window.__dshApplyWallpaperVars = applyVars
     window.__dshWallpaperCleanup = () => {
       document.body.style.removeProperty('--dsh-wallpaper-url')
+      document.body.classList.remove('dsh-video-wallpaper')
+      const css = document.getElementById('dsh-video-composer-css')
+      if (css) css.remove()
+      const video = document.getElementById('dsh-wallpaper-video')
+      if (video !== null) {
+        video.pause()
+        video.removeAttribute('src')
+        video.remove()
+      }
       document.body.style.removeProperty('--dsh-sidebar-w')
       document.body.style.removeProperty('--dsw-alias-markdown-code-block')
       document.body.style.removeProperty('--dsw-alias-markdown-code-block-banner')
@@ -541,24 +768,28 @@ function applyWallpaper(win, wallpaper) {
   })()`).then((state) => {
     log('wallpaper applied: ' + state)
   }).catch((error) => log('wallpaper scheme detection failed:', String(error)))
-  setWallpaperLayer(win, dataUrl).catch((error) => log('wallpaper layer failed:', String(error)))
+  applyWallpaperFile(win, wallpaper).catch((error) => log('wallpaper layer failed:', String(error)))
 }
 
-/** 文件菜单：选择壁纸图片，立即生效（不重载页面）。 */
+/** 文件菜单：选择壁纸图片/视频，立即生效（不重载页面）。 */
 async function pickWallpaper() {
   const win = mainWindow
   if (win === null || win.isDestroyed()) return
   const result = await dialog.showOpenDialog(win, {
-    title: '选择壁纸图片',
+    title: '选择壁纸图片或视频',
     properties: ['openFile'],
-    filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }],
+    filters: [
+      { name: '图片 / 视频', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'mp4', 'm4v', 'webm', 'mov', 'ogv'] },
+      { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] },
+      { name: '视频', extensions: ['mp4', 'm4v', 'webm', 'mov', 'ogv'] },
+    ],
   })
   if (result.canceled || result.filePaths.length === 0) return
   const file = result.filePaths[0]
   saveConfig({ wallpaper: file })
   log(`wallpaper set: ${file}`)
   try {
-    await setWallpaperLayer(win, wallpaperDataUrl(file))
+    await applyWallpaperFile(win, file)
     log('wallpaper updated live')
   } catch (error) {
     log('wallpaper live update failed:', String(error))
@@ -578,6 +809,7 @@ async function clearWallpaper() {
       if (typeof window.__dshWallpaperCleanup === 'function') window.__dshWallpaperCleanup()
       return !!el
     })()`)
+    await clearWallpaperVideoLayer(win)
     if (wallpaperCssKey !== null) {
       win.webContents.removeInsertedCSS(wallpaperCssKey).catch(() => {})
       wallpaperCssKey = null
@@ -622,9 +854,9 @@ function configuredWallpaper() {
  *  @param sidebarImage 侧栏独立壁纸路径或 null（null = 共用主壁纸）；
  *  @param flags 各区域透明开关 {newSession,input,sidebar,main}；
  *  @param dark 是否深色主题（false = 浅色） */
-function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, dark = true) {
-  const imageName = image === null ? '（无）' : path.basename(image)
-  const sidebarName = sidebarImage === null ? '（无）' : path.basename(sidebarImage)
+function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, dark = true, videoSound = false) {
+  const imageName = image === null ? '（无）' : `${path.basename(image)}${isVideoWallpaper(image) ? '（视频）' : ''}`
+  const sidebarName = sidebarImage === null ? '（无）' : `${path.basename(sidebarImage)}${isVideoWallpaper(sidebarImage) ? '（视频）' : ''}`
   const alphaPct = Math.round(codeAlpha * 100)
   return `<!doctype html>
 <html lang="zh-CN">
@@ -706,7 +938,7 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
     <div class="body">
       <div class="title">界面设置</div>
       <div class="imgrow">
-        <span class="label">壁纸图片</span>
+        <span class="label">壁纸图片/视频</span>
         <span class="imgname" id="imgname">${imageName}</span>
         <button class="smallbtn" id="pick">更换…</button>
         <button class="smallbtn" id="clearimg">清除</button>
@@ -746,6 +978,11 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
           <label class="check"><input type="checkbox" id="tMain" ${flags.main ? 'checked' : ''}><span>主界面</span></label>
         </div>
       </div>
+      <div class="row" style="margin-top:14px">
+        <span class="label">视频声音</span>
+        <label class="check"><input type="checkbox" id="vSound" ${videoSound ? 'checked' : ''}><span>播放壁纸视频的声音</span></label>
+      </div>
+      <div class="desc" style="margin-top:6px;padding-left:104px">仅当壁纸是视频时生效（图片壁纸无声音）。</div>
     </div>
     <div class="footer">
       <button class="btn btn-ghost" id="reset">恢复默认</button>
@@ -779,13 +1016,20 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
       sidebar: document.getElementById('tSide').checked,
       main: document.getElementById('tMain').checked,
     })
+    const vSoundEl = document.getElementById('vSound')
     const preview = () => {
       blurVal.textContent = blurEl.value + 'px'
       alphaVal.textContent = alphaEl.value + '%'
-      api.preview({ blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags() })
+      api.preview({
+        blur: Number(blurEl.value),
+        codeAlpha: Number(alphaEl.value) / 100,
+        transparent: tFlags(),
+        videoSound: vSoundEl.checked,
+      })
     }
     blurEl.addEventListener('input', preview)
     alphaEl.addEventListener('input', preview)
+    vSoundEl.addEventListener('change', preview)
     document.querySelectorAll('.checks input').forEach((el) => el.addEventListener('change', preview))
     document.getElementById('pick').addEventListener('click', () => api.pickImage())
     document.getElementById('clearimg').addEventListener('click', () => api.clearImage())
@@ -799,13 +1043,13 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
       if (file !== null) setMode(true)
     })
     document.getElementById('reset').addEventListener('click', () => {
-      blurEl.value = 18; alphaEl.value = 45; preview()
+      blurEl.value = 18; alphaEl.value = 45; vSoundEl.checked = false; preview()
     })
     document.getElementById('cancel').addEventListener('click', () => api.commit({ ok: false }))
-    document.getElementById('ok').addEventListener('click', () => api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags() }))
+    document.getElementById('ok').addEventListener('click', () => api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags(), videoSound: vSoundEl.checked }))
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') api.commit({ ok: false })
-      else if (event.key === 'Enter') api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags() })
+      else if (event.key === 'Enter') api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags(), videoSound: vSoundEl.checked })
     })
     preview()
   </script>
@@ -822,6 +1066,7 @@ let imageDraft = null // 对话框内更换后的主壁纸路径（null 表示�
 let sidebarOriginal = null // 对话框打开时的侧栏壁纸（null = 共用主图）
 let sidebarDraft = null // 对话框内侧栏壁纸草稿（null = 共用主图）
 let transparentOriginal = null // 对话框打开时的透明开关
+let videoSoundOriginal = false // 对话框打开时的视频声音开关
 
 /** 恢复对话框打开前的壁纸状态（取消时）。 */
 function restoreWallpaperState() {
@@ -829,8 +1074,12 @@ function restoreWallpaperState() {
   if (win === null || win.isDestroyed()) return
   setWallpaperBlurVar(blurOriginal)
   setCodeAlphaVar(codeOriginal)
-  setSidebarWallpaperLayer(win, sidebarOriginal === null ? null : wallpaperDataUrl(sidebarOriginal))
-    .catch((error) => log('sidebar restore failed:', String(error)))
+  setWallpaperVideoSoundLive(win, videoSoundOriginal).catch(() => {})
+  if (sidebarOriginal === null) {
+    clearSidebarWallpaperLayer(win).catch((error) => log('sidebar restore failed:', String(error)))
+  } else {
+    setSidebarWallpaperFile(win, sidebarOriginal).catch((error) => log('sidebar restore failed:', String(error)))
+  }
   if (transparentOriginal !== null) {
     win.webContents.executeJavaScript(`(() => {
       window.__dshWallpaperTransparent = ${JSON.stringify(transparentOriginal)}
@@ -880,6 +1129,7 @@ async function showWallpaperDialog() {
   sidebarOriginal = configuredSidebarWallpaper()
   sidebarDraft = sidebarOriginal
   transparentOriginal = transparentFlags()
+  videoSoundOriginal = wallpaperVideoSound()
   const dlg = new BrowserWindow({
     width: 420,
     height: 470,
@@ -906,14 +1156,18 @@ async function showWallpaperDialog() {
   dlg.on('closed', () => {
     blurDialog = null
   })
-  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal, transparentOriginal, dialogDark))}`)
+  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal, transparentOriginal, dialogDark, videoSoundOriginal))}`)
 }
 
-// 滑块/开关实时预览（模糊 + 代码块透明度 + 区域透明开关）
+// 滑块/开关实时预览（模糊 + 代码块透明度 + 区域透明开关 + 视频声音）
 ipcMain.on('dsh:wallpaper-preview', (_event, payload) => {
   if (payload?.blur !== undefined) setWallpaperBlurVar(payload.blur)
   if (payload?.codeAlpha !== undefined) setCodeAlphaVar(payload.codeAlpha)
   if (payload?.transparent !== undefined) setTransparentFlags(payload.transparent)
+  if (payload?.videoSound !== undefined) {
+    setWallpaperVideoSoundLive(mainWindow, payload.videoSound === true)
+      .catch((error) => log('video sound preview failed:', String(error)))
+  }
 })
 
 /** 把区域透明开关写入页面并即时重应用（对话框预览用）。 */
@@ -933,21 +1187,25 @@ function setTransparentFlags(flags) {
   })()`).catch(() => {})
 }
 
-// 对话框内更换图片：弹出文件选择，即时应用到主窗口
+// 对话框内更换图片/视频：弹出文件选择，即时应用到主窗口
 ipcMain.on('dsh:wallpaper-pick-image', async (_event) => {
   const win = mainWindow
   const dlg = blurDialog
   if (win === null || win.isDestroyed() || dlg === null || dlg.isDestroyed()) return
   const result = await dialog.showOpenDialog(win, {
-    title: '选择壁纸图片',
+    title: '选择壁纸图片或视频',
     properties: ['openFile'],
-    filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }],
+    filters: [
+      { name: '图片 / 视频', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'mp4', 'm4v', 'webm', 'mov', 'ogv'] },
+      { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] },
+      { name: '视频', extensions: ['mp4', 'm4v', 'webm', 'mov', 'ogv'] },
+    ],
   })
   if (result.canceled || result.filePaths.length === 0) return
   const file = result.filePaths[0]
   imageDraft = file
   try {
-    await setWallpaperLayer(win, wallpaperDataUrl(file))
+    await applyWallpaperFile(win, file)
     log(`wallpaper preview: ${file}`)
   } catch (error) {
     log('wallpaper preview failed:', String(error))
@@ -955,7 +1213,7 @@ ipcMain.on('dsh:wallpaper-pick-image', async (_event) => {
   dlg.webContents.send('dsh:wallpaper-image-chosen', file)
 })
 
-// 对话框内清除图片：即时移除壁纸变量（伪元素失去背景图即无壁纸）
+// 对话框内清除图片/视频：即时移除壁纸变量（伪元素失去背景图即无壁纸）
 ipcMain.on('dsh:wallpaper-clear-image', async () => {
   const win = mainWindow
   const dlg = blurDialog
@@ -966,6 +1224,7 @@ ipcMain.on('dsh:wallpaper-clear-image', async () => {
       document.body.style.removeProperty('--dsh-wallpaper-url')
       return true
     })()`)
+    await clearWallpaperVideoLayer(win)
     log('wallpaper preview: cleared')
   } catch (error) {
     log('wallpaper clear preview failed:', String(error))
@@ -979,15 +1238,19 @@ ipcMain.on('dsh:wallpaper-pick-sidebar-image', async (_event) => {
   const dlg = blurDialog
   if (win === null || win.isDestroyed() || dlg === null || dlg.isDestroyed()) return
   const result = await dialog.showOpenDialog(win, {
-    title: '选择侧栏壁纸图片',
+    title: '选择侧栏壁纸图片或视频',
     properties: ['openFile'],
-    filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }],
+    filters: [
+      { name: '图片 / 视频', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'mp4', 'm4v', 'webm', 'mov', 'ogv'] },
+      { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] },
+      { name: '视频', extensions: ['mp4', 'm4v', 'webm', 'mov', 'ogv'] },
+    ],
   })
   if (result.canceled || result.filePaths.length === 0) return
   const file = result.filePaths[0]
   sidebarDraft = file
   try {
-    await setSidebarWallpaperLayer(win, wallpaperDataUrl(file))
+    await setSidebarWallpaperFile(win, file)
     log(`sidebar wallpaper preview: ${file}`)
   } catch (error) {
     log('sidebar wallpaper preview failed:', String(error))
@@ -1002,7 +1265,7 @@ ipcMain.on('dsh:wallpaper-clear-sidebar-image', async () => {
   if (win === null || win.isDestroyed() || dlg === null || dlg.isDestroyed()) return
   sidebarDraft = null
   try {
-    await setSidebarWallpaperLayer(win, null)
+    await clearSidebarWallpaperLayer(win)
     log('sidebar wallpaper preview: cleared')
   } catch (error) {
     log('sidebar wallpaper clear preview failed:', String(error))
@@ -1016,12 +1279,12 @@ ipcMain.on('dsh:wallpaper-sidebar-mode', async (_event, mode) => {
   if (win === null || win.isDestroyed()) return
   if (mode === 'shared') {
     sidebarDraft = null
-    await setSidebarWallpaperLayer(win, null)
+    await clearSidebarWallpaperLayer(win)
       .catch((error) => log('sidebar mode shared failed:', String(error)))
   } else {
     sidebarDraft = sidebarOriginal
     if (sidebarOriginal !== null) {
-      await setSidebarWallpaperLayer(win, wallpaperDataUrl(sidebarOriginal))
+      await setSidebarWallpaperFile(win, sidebarOriginal)
         .catch((error) => log('sidebar mode separate failed:', String(error)))
     }
   }
@@ -1045,9 +1308,10 @@ ipcMain.on('dsh:wallpaper-commit', (_event, payload) => {
       cfg.transparentSidebar = payload.transparent.sidebar !== false
       cfg.transparentMain = payload.transparent.main !== false
     }
+    if (payload.videoSound !== undefined) cfg.wallpaperVideoSound = payload.videoSound === true
     saveConfig(cfg)
     const T = payload.transparent
-    log(`wallpaper settings saved: blur=${cfg.wallpaperBlur ?? '?'}px codeAlpha=${cfg.wallpaperCodeAlpha ?? '?'} image=${imageDraft ?? '(none)'} sidebar=${sidebarDraft ?? '(shared)'} transparent=${T ? `${T.newSession}/${T.input}/${T.sidebar}/${T.main}` : '?'}`)
+    log(`wallpaper settings saved: blur=${cfg.wallpaperBlur ?? '?'}px codeAlpha=${cfg.wallpaperCodeAlpha ?? '?'} image=${imageDraft ?? '(none)'} sidebar=${sidebarDraft ?? '(shared)'} transparent=${T ? `${T.newSession}/${T.input}/${T.sidebar}/${T.main}` : '?'} videoSound=${cfg.wallpaperVideoSound ?? false}`)
   } else {
     restoreWallpaperState()
   }
@@ -1579,6 +1843,9 @@ const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
+  // 视频壁纸协议必须在 app ready 前声明特权（stream 支持）
+  registerWallpaperProtocol()
+
   app.on('second-instance', () => {
     // 已在托盘运行时再次启动：恢复主窗口
     showMainWindow()
@@ -1588,6 +1855,9 @@ if (!gotLock) {
     // Windows 通知（托盘气泡）需要 AppUserModelID
     app.setAppUserModelId('ai.deepseek.dsh-desktop')
     trayEnabled = !process.argv.includes('--no-tray') && !process.argv.includes('--smoke-test')
+
+    // 视频壁纸协议：把本地视频文件流式供给渲染进程（http 页面无法直接加载 file://）
+    protocol.handle('dsh-wallpaper', handleWallpaperProtocol)
 
     const runtime = resolveRuntime()
     if (runtime === null) {
