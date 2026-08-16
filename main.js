@@ -253,6 +253,20 @@ function resolveWallpaper() {
   return null
 }
 
+/** 采样图片主色（resize 到 1x1 取平均像素），失败返回 null。 */
+function dominantColor(file) {
+  try {
+    const img = nativeImage.createFromPath(file)
+    if (img.isEmpty()) return null
+    const buf = img.resize({ width: 1, height: 1 }).toBitmap() // BGRA
+    if (buf === null || buf.length < 4) return null
+    const r = buf[2], g = buf[1], b = buf[0]
+    return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`
+  } catch {
+    return null
+  }
+}
+
 /** 把壁纸图片转成 data: URL（http 页面不能加载 file:// 资源）。
  *  大图（手机原图可达数十 MB）会拖死渲染器（解码 + 全屏毛玻璃逐帧重采样），
  *  因此用 nativeImage 缩放到最长边 3840px 后再编码（4K 屏满清晰度；
@@ -1539,6 +1553,12 @@ ipcMain.on('dsh:wallpaper-commit', (_event, payload) => {
 let mainWindow = null
 
 function createWindow(url, wallpaper) {
+  // 导航切换期（splash 卸载 → GUI 首帧）窗口显示背景色；用启动画面图片的
+  // 主色代替深黑，过渡不闪黑。无媒体/视频时保持品牌深色。
+  const splashHit = resolveSplashFile(wallpaper)
+  const bgColor = (splashHit !== null && !splashHit.isVideo)
+    ? (dominantColor(splashHit.file) ?? '#101318')
+    : '#101318'
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -1548,7 +1568,7 @@ function createWindow(url, wallpaper) {
     // 一体化标题栏：无边框，标题栏由注入到 GUI 页面的自绘栏承担
     // （左侧 返回/前进/菜单，右侧 最小化/最大化/关闭）
     frame: false,
-    backgroundColor: '#101318',
+    backgroundColor: bgColor,
     icon: iconPath(),
     webPreferences: {
       contextIsolation: true,
@@ -1634,6 +1654,14 @@ function createWindow(url, wallpaper) {
     applySidebarWallpaper(win)
     injectTitlebar(win)
     tbSendNav(win)
+    // GUI 加载完成后把窗口背景恢复为页面主题色（滚动露底时不露启动画面主色）
+    win.webContents.executeJavaScript('getComputedStyle(document.body).backgroundColor')
+      .then((color) => {
+        if (typeof color === 'string' && color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') {
+          win.setBackgroundColor(color)
+        }
+      })
+      .catch(() => {})
     if (smoke) {
       const title = win.webContents.getTitle()
       console.log(`SMOKE_OK ${JSON.stringify({ title, url: win.webContents.getURL() })}`)
