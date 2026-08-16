@@ -483,9 +483,14 @@ function injectWallpaperCss(win) {
       -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
       mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
     }
+    /* 新会话(hero)界面：不渲染输入区遮罩/毛玻璃，保持全透 */
+    #root [data-phase='hero'] [class*='composerSeat']::before,
+    #root [data-phase='hero'] [class*='composerSeat']::after {
+      display: none !important;
+    }
     /* 侧栏底部遮罩：与主界面输入区完全同高——顶部锚定在输入区顶部
-       （--dsh-sidebar-mask-top，动态测量），底部到窗口底，即套用
-       输入区同款的高度范围；顶部 36px 渐变；footArea 抬到遮罩之上。
+       （--dsh-sidebar-mask-top，动态测量），底部到窗口底（贴着最底下），
+       顶部 36px 渐变；footArea 抬到遮罩之上。
        侧栏不透明时 --dsh-sidebar-fade-url=none 撤销这层 */
     #root [data-slot='root'] > div > div:first-child > [data-slot] > div {
       position: relative !important;
@@ -500,8 +505,8 @@ function injectWallpaperCss(win) {
       left: 0 !important;
       right: 0 !important;
       top: var(--dsh-sidebar-mask-top, 740px) !important;
-      /* 与输入区同步：玻璃底部不贴窗口底边（上移 12px） */
-      bottom: 12px !important;
+      /* 贴底：玻璃底部到窗口底边 */
+      bottom: 0 !important;
       z-index: 0 !important;
       pointer-events: none !important;
       background-image: var(--dsh-sidebar-fade-url, var(--dsh-wallpaper-url-sidebar, var(--dsh-wallpaper-url))) !important;
@@ -592,7 +597,7 @@ function setWallpaperVideoLayer(win, file) {
         '}' +
         'body.dsh-video-wallpaper #root [data-slot="root"] > div > div:first-child > [data-slot] > div::after {' +
         '  content:"" !important;position:absolute !important;left:0 !important;right:0 !important;' +
-        '  top:var(--dsh-sidebar-mask-top,740px) !important;bottom:12px !important;z-index:0 !important;pointer-events:none !important;' +
+        '  top:var(--dsh-sidebar-mask-top,740px) !important;bottom:0 !important;z-index:0 !important;pointer-events:none !important;' +
         '  background:linear-gradient(to bottom,transparent 0px,var(--dsh-wallpaper-panel,rgba(12,15,22,0.58)) 36px) !important;' +
         '  backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
         '  -webkit-backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
@@ -786,8 +791,13 @@ function applyWallpaper(win, wallpaper) {
       // 顶部锚定 = 主界面输入区顶部 - 36px 渐变区（与输入区同一高度范围）
       if (T.sidebar) document.body.style.removeProperty('--dsh-sidebar-fade-url')
       else document.body.style.setProperty('--dsh-sidebar-fade-url', 'none')
+      // 侧栏遮罩顶部锚定 = 主界面输入区顶部 - 36px 渐变区；
+      // 新会话(hero)界面隐藏遮罩（锚点推到视口底部 => 零高度）
+      const hero = document.querySelector('[data-phase="hero"]') !== null
       const seat = document.querySelector('[class*="composerSeat"]')
-      if (seat !== null) {
+      if (hero) {
+        document.body.style.setProperty('--dsh-sidebar-mask-top', '100vh')
+      } else if (seat !== null) {
         const top = seat.getBoundingClientRect().top
         document.body.style.setProperty('--dsh-sidebar-mask-top', (top - 36) + 'px')
       }
@@ -805,17 +815,31 @@ function applyWallpaper(win, wallpaper) {
     window.__dshApplyWallpaperVars = applyVars
     // 窗口尺寸/输入区变化时重新对齐侧栏遮罩；输入区晚渲染时延迟重试
     window.__dshResyncMask = () => {
+      const hero = document.querySelector('[data-phase="hero"]') !== null
       const seat = document.querySelector('[class*="composerSeat"]')
-      if (seat !== null) {
+      if (hero) {
+        document.body.style.setProperty('--dsh-sidebar-mask-top', '100vh')
+      } else if (seat !== null) {
         const top = seat.getBoundingClientRect().top
         document.body.style.setProperty('--dsh-sidebar-mask-top', (top - 36) + 'px')
       }
     }
     window.addEventListener('resize', window.__dshResyncMask)
+    // 会话阶段(hero/active/settling)切换时重新对齐侧栏遮罩：
+    // 新会话界面立即隐藏，回到会话界面立即恢复贴底
+    const phaseObserver = new MutationObserver(() => {
+      if (typeof window.__dshResyncMask === 'function') window.__dshResyncMask()
+    })
+    phaseObserver.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-phase'] })
+    window.__dshPhaseObserver = phaseObserver
     setTimeout(window.__dshResyncMask, 1000)
     setTimeout(window.__dshResyncMask, 3000)
     setTimeout(window.__dshResyncMask, 6000)
     window.__dshWallpaperCleanup = () => {
+      if (window.__dshPhaseObserver) {
+        window.__dshPhaseObserver.disconnect()
+        window.__dshPhaseObserver = null
+      }
       if (typeof window.__dshResyncMask === 'function') {
         window.removeEventListener('resize', window.__dshResyncMask)
         window.__dshResyncMask = null

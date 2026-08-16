@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('dshTitlebar', {
   back: () => ipcRenderer.send('dsh:tb-back'),
   forward: () => ipcRenderer.send('dsh:tb-forward'),
   menu: (name, x, y) => ipcRenderer.send('dsh:tb-menu', { name, x, y }),
+  menuAction: (id) => ipcRenderer.send('dsh:tb-menu-action', id),
   minimize: () => ipcRenderer.send('dsh:tb-minimize'),
   maximizeToggle: () => ipcRenderer.send('dsh:tb-maximize-toggle'),
   close: () => ipcRenderer.send('dsh:tb-close'),
@@ -20,4 +21,5 @@ contextBridge.exposeInMainWorld('dshTitlebar', {
   notifyTitle: (index) => ipcRenderer.send('dsh:tb-title', Number(index)),
   onNavState: (cb) => ipcRenderer.on('dsh:tb-nav-state', (_event, state) => cb(state)),
   onMaxState: (cb) => ipcRenderer.on('dsh:tb-max-state', (_event, maximized) => cb(maximized)),
+  onMenuData: (cb) => ipcRenderer.on('dsh:tb-menu-data', (_event, payload) => cb(payload)),
 })

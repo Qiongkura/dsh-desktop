@@ -27,18 +27,76 @@
     '<button class="dsh-tb-wbtn" id="dsh-tb-close" title="关闭">' + SVG_ICONS.close + '</button>'
   ;(document.body || document.documentElement).appendChild(bar)
 
-  // 主题：无壁纸时按系统主题给毛玻璃配色（有壁纸时优先 --dsh-wallpaper-panel）
-  const dark = matchMedia('(prefers-color-scheme: dark)').matches
-  bar.style.setProperty('--dsh-tb-bg', dark ? 'rgba(12, 15, 22, 0.72)' : 'rgba(255, 255, 255, 0.65)')
-  bar.style.setProperty('--dsh-tb-fg', dark ? '#f9fafb' : '#0f1115')
-  bar.style.setProperty('--dsh-tb-border', dark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)')
-  bar.style.setProperty('--dsh-tb-hover', dark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.06)')
+  // 主题：跟随 GUI 外观（body[data-ds-dark-theme] / colorScheme），
+  // 未设置时按系统主题给毛玻璃配色（有壁纸时优先 --dsh-wallpaper-panel / -fg）
+  const applyTbTheme = () => {
+    const dark = document.body.hasAttribute('data-ds-dark-theme')
+      || (getComputedStyle(document.documentElement).colorScheme || 'light') === 'dark'
+    bar.style.setProperty('--dsh-tb-bg', dark ? 'rgba(12, 15, 22, 0.72)' : 'rgba(255, 255, 255, 0.65)')
+    bar.style.setProperty('--dsh-tb-fg', dark ? '#f9fafb' : '#0f1115')
+    bar.style.setProperty('--dsh-tb-border', dark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)')
+    bar.style.setProperty('--dsh-tb-hover', dark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.06)')
+    // 壁纸面板变量同源刷新：标题栏前景/边框/悬停实时跟随外观切换
+    if (typeof window.__dshApplyWallpaperVars === 'function') window.__dshApplyWallpaperVars()
+  }
+  applyTbTheme()
+  new MutationObserver(applyTbTheme).observe(document.body, {
+    attributes: true,
+    attributeFilter: ['data-ds-dark-theme'],
+  })
+
+  // ---- 自绘下拉菜单：替代原生弹出菜单，样式跟随外观 ----
+  let menuEl = null
+  let detachMenu = null
+  const closeMenu = () => {
+    if (detachMenu !== null) { detachMenu(); detachMenu = null }
+    if (menuEl !== null) { menuEl.remove(); menuEl = null }
+  }
+  api.onMenuData(({ items, x, y }) => {
+    closeMenu()
+    if (!Array.isArray(items) || items.length === 0) return
+    const el = document.createElement('div')
+    el.id = 'dsh-tb-menu'
+    el.innerHTML = items.map((item) => {
+      if (item.type === 'separator') return '<div class="dsh-tb-msep"></div>'
+      const acc = item.accelerator ? `<span class="dsh-tb-mi-acc">${item.accelerator}</span>` : ''
+      const disabled = item.enabled ? '' : ' disabled'
+      return `<button class="dsh-tb-mi${disabled}" data-id="${item.id}"${disabled}>` +
+        `<span class="dsh-tb-mi-label">${item.label}</span>${acc}</button>`
+    }).join('')
+    el.style.visibility = 'hidden'
+    ;(document.body || document.documentElement).appendChild(el)
+    const rect = el.getBoundingClientRect()
+    el.style.left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8)) + 'px'
+    el.style.top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8)) + 'px'
+    el.style.visibility = 'visible'
+    el.querySelectorAll('.dsh-tb-mi').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id
+        closeMenu()
+        if (id) api.menuAction(id)
+      })
+    })
+    const onDocClick = (e) => { if (!el.contains(e.target)) closeMenu() }
+    const onKey = (e) => { if (e.key === 'Escape') closeMenu() }
+    const onBlur = () => closeMenu()
+    document.addEventListener('click', onDocClick)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('blur', onBlur)
+    menuEl = el
+    detachMenu = () => {
+      document.removeEventListener('click', onDocClick)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('blur', onBlur)
+    }
+  })
 
   document.getElementById('dsh-tb-back').addEventListener('click', () => api.back())
   document.getElementById('dsh-tb-fwd').addEventListener('click', () => api.forward())
   bar.querySelectorAll('.dsh-tb-mbtn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const r = btn.getBoundingClientRect()
+      closeMenu()
       api.menu(btn.dataset.menu, Math.round(r.left), Math.round(r.bottom + 4))
     })
   })
