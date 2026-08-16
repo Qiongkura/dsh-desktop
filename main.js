@@ -346,19 +346,20 @@ function handleWallpaperProtocol(request) {
  *  模式（配置 splashMode）：
  *    default   纯品牌色底（无壁纸）
  *    follow    跟随主界面壁纸（图片 data URL；视频走 dsh-wallpaper://）
- *    image     自定义图片（splashFile）
- *    animation 自定义动画（splashFile：视频/GIF，走 dsh-wallpaper://） */
+ *    custom    自定义素材（splashFile：图片或视频，按扩展名自动识别） */
 function showSplash(win, wallpaper) {
   const cfg = loadConfig()
-  const mode = cfg.splashMode || 'default'
+  const mode = cfg.splashMode === 'follow' || cfg.splashMode === 'custom' ? cfg.splashMode : 'default'
   let media = null
   let isVideo = false
   const custom = cfg.splashFile && fs.existsSync(cfg.splashFile) ? path.resolve(cfg.splashFile) : null
-  if (mode === 'image' && custom !== null) {
-    media = wallpaperDataUrl(custom)
-  } else if (mode === 'animation' && custom !== null) {
-    media = wallpaperVideoUrl(custom)
-    isVideo = true
+  if (mode === 'custom' && custom !== null) {
+    if (isVideoWallpaper(custom)) {
+      media = wallpaperVideoUrl(custom)
+      isVideo = true
+    } else {
+      media = wallpaperDataUrl(custom)
+    }
   } else if (mode === 'follow' && wallpaper !== null) {
     if (isVideoWallpaper(wallpaper)) {
       media = wallpaperVideoUrl(wallpaper)
@@ -411,10 +412,10 @@ function panelAlpha() {
   return Number.isFinite(n) && n >= 0 && n <= 1 ? n : 0.55
 }
 
-/** 启动画面模式：default / follow / image / animation，默认 default。 */
+/** 启动画面模式：default / follow / custom（自定义图片或视频），默认 default。 */
 function splashMode() {
   const mode = loadConfig().splashMode
-  return ['default', 'follow', 'image', 'animation'].includes(mode) ? mode : 'default'
+  return mode === 'follow' || mode === 'custom' ? mode : 'default'
 }
 
 /** 启动画面自定义素材（图片或动画视频），不存在返回 null。 */
@@ -1025,12 +1026,11 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
         <span class="label">启动画面</span>
         <div class="seg">
           <button class="segbtn ${splashMode === 'default' ? 'on' : ''}" id="spDefault">默认</button>
-          <button class="segbtn ${splashMode === 'follow' ? 'on' : ''}" id="spFollow">跟随主界面</button>
-          <button class="segbtn ${splashMode === 'image' ? 'on' : ''}" id="spImage">自定义图片</button>
-          <button class="segbtn ${splashMode === 'animation' ? 'on' : ''}" id="spAnim">自定义动画</button>
+          <button class="segbtn ${splashMode === 'follow' ? 'on' : ''}" id="spFollow">跟随主题</button>
+          <button class="segbtn ${splashMode === 'custom' ? 'on' : ''}" id="spCustom">自定义</button>
         </div>
       </div>
-      <div class="imgrow" id="splashRow" style="${splashMode === 'image' || splashMode === 'animation' ? '' : 'display:none'}">
+      <div class="imgrow" id="splashRow" style="${splashMode === 'custom' ? '' : 'display:none'}">
         <span class="label">启动素材</span>
         <span class="imgname" id="splashname">${splashName}</span>
         <button class="smallbtn" id="splashpick">选择…</button>
@@ -1109,12 +1109,11 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
       blurEl.value = 18; alphaEl.value = 45; glassEl.value = 10; panelEl.value = 55
       vSoundEl.checked = false; preview()
     })
-    // 启动画面模式：默认/跟随主界面/自定义图片/自定义动画
+    // 启动画面模式：默认/跟随主题/自定义
     const splashButtons = {
       default: document.getElementById('spDefault'),
       follow: document.getElementById('spFollow'),
-      image: document.getElementById('spImage'),
-      animation: document.getElementById('spAnim'),
+      custom: document.getElementById('spCustom'),
     }
     const splashRow = document.getElementById('splashRow')
     const splashNameEl = document.getElementById('splashname')
@@ -1124,7 +1123,7 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
       for (const [key, btn] of Object.entries(splashButtons)) {
         btn.classList.toggle('on', key === mode)
       }
-      splashRow.style.display = (mode === 'image' || mode === 'animation') ? '' : 'none'
+      splashRow.style.display = mode === 'custom' ? '' : 'none'
     }
     for (const [key, btn] of Object.entries(splashButtons)) {
       btn.addEventListener('click', () => setSplashMode(key))
@@ -1235,7 +1234,7 @@ async function showWallpaperDialog() {
   splashFileOriginal = configuredSplashFile()
   splashFileDraft = splashFileOriginal
   const dlg = new BrowserWindow({
-    width: 420,
+    width: 460,
     height: 640,
     show: false,
     frame: false,
@@ -1420,21 +1419,19 @@ ipcMain.on('dsh:wallpaper-sidebar-mode', async (_event, mode) => {
   }
 })
 
-// 对话框内选择启动素材（按模式区分图片/动画滤镜）：即时保存草稿
+// 对话框内选择启动素材（自定义模式，图片/视频均可）：即时保存草稿
 ipcMain.on('dsh:wallpaper-pick-splash', async (_event, mode) => {
   const win = mainWindow
   const dlg = blurDialog
   if (win === null || win.isDestroyed() || dlg === null || dlg.isDestroyed()) return
-  const isAnim = mode === 'animation'
   const result = await dialog.showOpenDialog(win, {
-    title: isAnim ? '选择启动动画' : '选择启动图片',
+    title: '选择启动素材',
     properties: ['openFile'],
-    filters: isAnim
-      ? [
-        { name: '动画 / 视频', extensions: ['mp4', 'm4v', 'webm', 'mov', 'ogv', 'gif'] },
-        { name: '所有文件', extensions: ['*'] },
-      ]
-      : [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }],
+    filters: [
+      { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] },
+      { name: '视频', extensions: ['mp4', 'm4v', 'webm', 'mov', 'ogv'] },
+      { name: '所有文件', extensions: ['*'] },
+    ],
   })
   if (result.canceled || result.filePaths.length === 0) return
   splashFileDraft = result.filePaths[0]
@@ -1474,7 +1471,7 @@ ipcMain.on('dsh:wallpaper-commit', (_event, payload) => {
       cfg.panelAlpha = Number.isFinite(pn) ? Math.max(0, Math.min(1, pn)) : 0.55
     }
     if (payload.splashMode !== undefined) {
-      cfg.splashMode = ['default', 'follow', 'image', 'animation'].includes(payload.splashMode)
+      cfg.splashMode = ['default', 'follow', 'custom'].includes(payload.splashMode)
         ? payload.splashMode : 'default'
     }
     if (splashFileDraft === null) cfg.splashFile = undefined
