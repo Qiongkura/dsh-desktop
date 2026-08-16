@@ -732,13 +732,6 @@ function injectWallpaperCss(win) {
         rgba(255,255,255,0.22) 24px) !important;
       backdrop-filter: blur(var(--dsh-glass-blur, 10px)) !important;
       -webkit-backdrop-filter: blur(var(--dsh-glass-blur, 10px)) !important;
-    }
-    /* 轨迹内部大面积容器（工具栏/时间线底/单元格）默认不透明背景会盖住玻璃，
-       改为透明让壁纸透出；色条（span）与状态标签等小元素颜色保留 */
-    #root [data-conversation-composer-overlay] [class*='toolbar'],
-    #root [data-conversation-composer-overlay] [class*='plot'],
-    #root [data-conversation-composer-overlay] [class*='cell'] {
-      background-color: transparent !important;
     }`
   wallpaperCssKey = win.webContents.insertCSS(css)
   wallpaperCssKey.catch(() => { wallpaperCssKey = null })
@@ -1888,6 +1881,31 @@ function createWindow(url, wallpaper) {
     // 启动画面（file:// 壁纸页）不算 GUI 加载完成
     if (!win.webContents.getURL().startsWith(url)) return
     log(`page loaded: ${win.webContents.getURL()}`)
+    // 轨迹玻璃辅助：把轨迹内"中性色（白/灰）背景"的元素透明化（让壁纸透出），
+    // 彩色元素（时间线色条/状态标签）保留。不依赖类名，按饱和度判断。
+    win.webContents.executeJavaScript(`(() => {
+      const isNeutral = (bg) => {
+        const m = /rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/.exec(bg)
+        if (m === null) return false
+        const r = +m[1], g = +m[2], b = +m[3]
+        const max = Math.max(r, g, b), min = Math.min(r, g, b)
+        return max === 0 ? true : (max - min) / max < 0.22
+      }
+      const apply = () => {
+        const root = document.querySelector('[data-conversation-composer-overlay]')
+        if (root === null) return
+        for (const el of root.querySelectorAll('*')) {
+          if (el.__dshT) continue
+          const bg = getComputedStyle(el).backgroundColor
+          if (bg !== 'rgba(0, 0, 0, 0)' && isNeutral(bg)) {
+            el.style.setProperty('background-color', 'transparent', 'important')
+            el.__dshT = true
+          }
+        }
+      }
+      apply()
+      setInterval(apply, 1500)
+    })()`).catch(() => {})
     // 启动层（#dsh-wallpaper-boot）由 preload 自管理：主界面渲染完成且
     // 满足最小展示时长后自行移除（duration>0 时媒体要播满，不能在此提前移除）
     // 页面重载后 insertCSS 的 key 失效，必须重置才能重新注入
