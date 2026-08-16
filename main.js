@@ -536,7 +536,14 @@ function setWallpaperVideoLayer(win, file) {
       s.textContent =
         'body.dsh-video-wallpaper #root [class*="composerSeat"]::before { display:none !important }' +
         'body.dsh-video-wallpaper #root [class*="composerSeat"] {' +
-        '  background:linear-gradient(to bottom,transparent 0px,var(--dsh-wallpaper-panel,rgba(12,15,22,0.58)) 44px) !important;' +
+        '  background:linear-gradient(to bottom,transparent 0px,var(--dsh-wallpaper-panel,rgba(12,15,22,0.58)) 36px) !important;' +
+        '  backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
+        '  -webkit-backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
+        '}' +
+        // 视频模式下侧栏底部：与输入框同款毛玻璃渐隐（图片层的 ::before 方案已停用）
+        'body.dsh-video-wallpaper #root [data-slot="root"] > div > div:first-child [class*="treeBody"] [class$="fade"] {' +
+        '  height:72px !important;' +
+        '  background:linear-gradient(to bottom,transparent 0px,var(--dsh-wallpaper-panel,rgba(12,15,22,0.58)) 36px) !important;' +
         '  backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
         '  -webkit-backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
         '}'
