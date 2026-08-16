@@ -34,17 +34,19 @@ contextBridge.exposeInMainWorld('dshTitlebar', {
 
 // ------------------------------------------------------------ 启动画面覆盖层 --
 
-let media = ''
+let payload = {}
 try {
-  media = ipcRenderer.sendSync('dsh:splash-cover-query') || ''
+  payload = ipcRenderer.sendSync('dsh:splash-cover-query') || {}
 } catch { /* 主进程未就绪时忽略 */ }
+const media = payload.media || ''
+const bg = typeof payload.bg === 'string' && payload.bg !== '' ? payload.bg : '#101318'
 if (media === '') return
 if (typeof location !== 'undefined' && location.protocol !== 'http:' && location.protocol !== 'https:') return
 
 const report = (msg) => { try { ipcRenderer.send('dsh:splash-cover-log', msg) } catch { /* 忽略 */ } }
 report('PRELOAD_RAN')
 
-const isVideo = /\.(mp4|m4v|webm|mov|ogv)(\?|#|$)/i.test(media)
+const isVideo = payload.isVideo === true || /\.(mp4|m4v|webm|mov|ogv)(\?|#|$)/i.test(media)
 
 const tryInject = () => {
   if (!document || !document.documentElement) {
@@ -53,7 +55,7 @@ const tryInject = () => {
   }
   const d = document.createElement('div')
   d.id = 'dsh-splash-cover'
-  d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#101318;overflow:hidden'
+  d.style.cssText = `position:fixed;inset:0;z-index:2147483647;background:${bg};overflow:hidden`
   d.innerHTML = isVideo
     ? `<video autoplay loop muted playsinline src="${media}" style="width:100%;height:100%;object-fit:cover"></video>`
     : `<img src="${media}" style="width:100%;height:100%;object-fit:cover">`

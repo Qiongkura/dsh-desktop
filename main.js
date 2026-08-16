@@ -269,9 +269,9 @@ function dominantColor(file) {
 
 /** 把壁纸图片转成 data: URL（http 页面不能加载 file:// 资源）。
  *  大图（手机原图可达数十 MB）会拖死渲染器（解码 + 全屏毛玻璃逐帧重采样），
- *  因此用 nativeImage 缩放到最长边 3840px 后再编码（4K 屏满清晰度；
+ *  因此用 nativeImage 缩放到最长边 max（默认 3840px）后再编码（4K 屏满清晰度；
  *  之前的 1920px 在 4K 屏上被拉伸 2 倍导致看起来模糊）。 */
-function wallpaperDataUrl(file) {
+function wallpaperDataUrl(file, max = 3840) {
   const ext = path.extname(file).toLowerCase()
   const mime = {
     '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -281,8 +281,7 @@ function wallpaperDataUrl(file) {
     const img = nativeImage.createFromPath(file)
     if (!img.isEmpty()) {
       const { width } = img.getSize()
-      const MAX = 3840
-      const resized = width > MAX ? img.resize({ width: MAX }) : img
+      const resized = width > max ? img.resize({ width: max }) : img
       const buf = ext === '.png' ? resized.toPNG() : resized.toJPEG(92)
       return `data:${mime};base64,${buf.toString('base64')}`
     }
@@ -425,16 +424,33 @@ function showSplash(win, wallpaper) {
   } catch { /* 壁纸失败不阻塞启动 */ }
 }
 
-/** GUI 加载期覆盖层媒体（dsh-wallpaper:// URL，preload 经 sendSync 读取）。
- *  由 createWindow 在创建主窗口时按当前启动画面模式计算。 */
-let splashCoverMedia = ''
+/** GUI 加载期覆盖层信息（preload 经 sendSync 读取）：
+ *  { media: dsh-wallpaper:// URL, bg: 媒体主色（加载期背景）, isVideo }
+ *  由 armSplashCover 在创建主窗口时按当前启动画面模式计算。 */
+let splashCoverPayload = { media: '', bg: '#101318', isVideo: false }
 
 /** GUI 加载期间保持启动画面媒体覆盖（无缝过渡到主界面）。
  *  覆盖层由 main-preload.js 在页面脚本执行前注入（documentElement 一出现
  *  就位），主界面输入框出现（或 20s 超时）后淡出移除——加载期间不会露出
  *  DSH 自己的加载画面。默认模式（无媒体）不覆盖。 */
 function armSplashCover(win, wallpaper) {
-  splashCoverMedia = resolveSplashMediaUrl(wallpaper).media ?? ''
+  const hit = resolveSplashFile(wallpaper)
+  if (hit === null) {
+    splashCoverPayload = { media: '', bg: '#101318', isVideo: false }
+    return
+  }
+  if (hit.isVideo) {
+    // 视频走协议 URL（无法内嵌）；加载期用品牌深色（视频本身黑底，自然）
+    splashCoverPayload = { media: wallpaperVideoUrl(hit.file), bg: '#101318', isVideo: true }
+  } else {
+    // 图片用压缩 data URL（启动时预生成一次）：preload 注入后立即显示，
+    // 没有协议加载期；bg 主色兜底 img 解码的几十毫秒
+    splashCoverPayload = {
+      media: wallpaperDataUrl(hit.file, 2048),
+      bg: dominantColor(hit.file) ?? '#101318',
+      isVideo: false,
+    }
+  }
 }
 
 // 覆盖层 preload 回传（PRELOAD_RAN/INJECTED/MEDIA_LOADED/MEDIA_ERROR/REMOVED）
@@ -442,9 +458,9 @@ ipcMain.on('dsh:splash-cover-log', (_event, msg) => {
   log(`splash cover: ${msg}`)
 })
 
-// 主窗口 preload 查询启动画面媒体 URL（同步返回，纯字符串）
+// 主窗口 preload 查询启动画面覆盖层信息（同步返回，纯字符串）
 ipcMain.on('dsh:splash-cover-query', (event) => {
-  event.returnValue = splashCoverMedia
+  event.returnValue = splashCoverPayload
 })
 
 /** 当前壁纸模糊值（px），来自配置，默认 18。 */
