@@ -436,7 +436,7 @@ function injectWallpaperCss(win) {
     #root [class*='composerSeat']::before {
       content: '' !important;
       position: absolute !important;
-      top: -36px !important;
+      top: 0 !important;
       bottom: 0 !important;
       left: 50% !important;
       right: auto !important;
@@ -445,9 +445,10 @@ function injectWallpaperCss(win) {
       border-radius: 22px !important;
       z-index: -1 !important;
       pointer-events: none !important;
+      /* 遮罩最高到输入栏上边界；顶部 20px 内部渐变丝滑过渡 */
       background: linear-gradient(to bottom,
         transparent 0px,
-        var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) 36px) !important;
+        var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) 20px) !important;
       backdrop-filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
       -webkit-backdrop-filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
     }
