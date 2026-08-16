@@ -21,3 +21,5 @@ build/icon-base-512.png
 .diag-data/
 diag-*
 installed-main.js
+
+# ffmpeg (downloaded on demand for video transcoding).toolchain/ffmpeg/
