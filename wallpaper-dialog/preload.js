@@ -34,4 +34,8 @@ contextBridge.exposeInMainWorld('dshWallpaperDialog', {
   onSplashImageChosen: (callback) => {
     ipcRenderer.on('dsh:wallpaper-splash-image-chosen', (_event, file) => callback(file))
   },
+  // 启动素材视频时长上限（秒）：动画时长滑块最大值
+  onSplashDurationMax: (callback) => {
+    ipcRenderer.on('dsh:wallpaper-splash-duration-max', (_event, max) => callback(max))
+  },
 })

@@ -361,6 +361,31 @@ function ffmpegPath() {
   return null
 }
 
+/** 读取视频时长（秒，向上取整）。用 ffmpeg -i 解析 stderr；失败返回 null。 */
+function videoDuration(file, cb) {
+  const ff = ffmpegPath()
+  if (ff === null) return cb(null)
+  execFile(ff, ['-i', file], { windowsHide: true, timeout: 15000 }, (error, _stdout, stderr) => {
+    // ffmpeg -i 无输出文件时以非零退出，时长在 stderr
+    const m = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(String(stderr))
+    if (m === null) return cb(null)
+    const secs = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])
+    cb(Number.isFinite(secs) ? Math.ceil(secs) : null)
+  })
+}
+
+/** 把视频时长上限（秒）发给设置对话框，更新动画时长滑块最大值。 */
+function sendSplashDurationMax(dlg, file) {
+  if (dlg === null || dlg.isDestroyed() || !isVideoWallpaper(file)) return
+  videoDuration(file, (secs) => {
+    if (secs !== null && secs > 0) {
+      const max = Math.min(secs, 600) // 上限 10 分钟，避免滑块难用
+      log(`splash video duration: ${secs}s, slider max = ${max}`)
+      dlg.webContents.send('dsh:wallpaper-splash-duration-max', max)
+    }
+  })
+}
+
 /** HEVC 视频自动转码为 H.264（CRF 17，视觉无损），输出同目录「原名-H264.mp4」。
  *  非 HEVC / 已有转码版 / 无 ffmpeg：直接回调原路径；转码完成回调转码版路径。 */
 function ensureTranscoded(file, cb) {
@@ -1350,6 +1375,23 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
     })
     api.onSplashImageChosen((file) => {
       splashNameEl.textContent = file === null ? '（无）' : file.split(/[\\\\/]/).pop()
+      // 非视频素材：动画时长上限复位为默认 10 秒（视频时长由 onSplashDurationMax 更新）
+      if (file === null || !/\.(mp4|m4v|webm|mov|ogv)$/i.test(file)) {
+        durationEl.max = '10'
+        if (Number(durationEl.value) > 10) {
+          durationEl.value = '10'
+          durationVal.textContent = '10 秒'
+        }
+      }
+    })
+    // 视频素材：动画时长滑块上限 = 视频完整时长（确保能完整播完）
+    api.onSplashDurationMax((max) => {
+      if (max > 0) {
+        durationEl.max = String(max)
+        const v = Math.min(Number(durationEl.value), max)
+        durationEl.value = String(v)
+        durationVal.textContent = v === 0 ? '0 秒（不等待）' : v + ' 秒'
+      }
     })
     document.getElementById('cancel').addEventListener('click', () => api.commit({ ok: false }))
     document.getElementById('ok').addEventListener('click', () => api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags(), videoSound: vSoundEl.checked, glassBlur: Number(glassEl.value), panelAlpha: Number(panelEl.value) / 100, splashMode: splashModeDraft, duration: Number(durationEl.value), fade: Number(fadeEl.value) }))
@@ -1481,6 +1523,11 @@ async function showWallpaperDialog() {
     blurDialog = null
   })
   dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal, transparentOriginal, dialogDark, videoSoundOriginal, glassOriginal, Math.round(panelOriginal * 100), splashModeOriginal, splashFileOriginal === null ? '（无）' : path.basename(splashFileOriginal), splashDurationOriginal, splashFadeOriginal))}`)
+  // 当前启动媒体是视频：把时长上限推给对话框（动画时长滑块最高可调 = 视频完整时长）
+  // 自定义素材用 splashFile；跟随主题用壁纸视频
+  const w = resolveWallpaper()
+  const eff = resolveSplashFile(w)
+  sendSplashDurationMax(dlg, eff === null ? null : eff.file)
 }
 
 // 滑块/开关实时预览（模糊 + 代码块透明度 + 区域透明开关 + 视频声音 + 玻璃模糊 + 面板透明度）
@@ -1660,6 +1707,7 @@ ipcMain.on('dsh:wallpaper-pick-splash', async (_event, mode) => {
   // HEVC 视频自动转码为 H.264（画质无损），完成后用转码版
   ensureTranscoded(picked, (file) => {
     splashFileDraft = file
+    sendSplashDurationMax(dlg, file)
     dlg.webContents.send('dsh:wallpaper-splash-image-chosen', file)
   })
 })
