@@ -1457,8 +1457,8 @@ async function showWallpaperDialog() {
     height: 780,
     show: false,
     frame: false,
-    // 置顶：不被主窗口的对话轨迹/输入框遮住
-    alwaysOnTop: true,
+    // 不置顶：父子窗口关系（parent: mainWindow）已保证本窗口始终在主窗口之上，
+    // 但不会挡住其他软件（置顶会盖住所有应用，连点击其他软件都不行）
     // 同关闭对话框：不透明窗口（Windows 透明窗口有输入问题）
     backgroundColor: dialogDark ? '#151517' : '#f6f7f9',
     resizable: false,
