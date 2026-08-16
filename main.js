@@ -371,6 +371,10 @@ function showSplash(win, wallpaper) {
   const mediaHtml = isVideo
     ? `<video class="wall" autoplay loop muted playsinline src="${media}"></video>`
     : `<div class="wall"${media === null ? '' : ` style="background:url('${media}') center/cover no-repeat"`}></div>`
+  // 只有默认模式显示品牌文字+底部渐变；跟随主题/自定义只显示壁纸/素材
+  const brandHtml = mode === 'default'
+    ? '<div class="shade"></div><div class="brand">DeepSeek Harness<small>正在启动本地服务…</small></div>'
+    : ''
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title></title><style>
     html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#101318}
     .wall{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
@@ -378,8 +382,7 @@ function showSplash(win, wallpaper) {
     .brand{position:fixed;left:28px;bottom:22px;color:#fff;font:600 20px/1.3 "Segoe UI",system-ui,sans-serif;opacity:.92}
     .brand small{display:block;font:400 12px/1.4 "Segoe UI",system-ui,sans-serif;opacity:.65}
   </style></head><body>
-    ${mediaHtml}<div class="shade"></div>
-    <div class="brand">DeepSeek Harness<small>正在启动本地服务…</small></div>
+    ${mediaHtml}${brandHtml}
   </body></html>`
   const splash = path.join(app.getPath('userData'), 'splash.html')
   try {
