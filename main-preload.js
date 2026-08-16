@@ -56,24 +56,39 @@ const tryInject = () => {
     setTimeout(tryInject, 5)
     return
   }
-  // 壁纸背景：页面加载期（HARNESS 卡片不渲染时）直接显示媒体；
-  // 主界面加载完成后由主进程的 injectWallpaperCss 接管（后注入覆盖同规则）
+  const isVideo = payload.isVideo === true || /\.(mp4|m4v|webm|mov|ogv)(\?|#|$)/i.test(media)
+  if (isVideo) {
+    // 视频：注入 <video> 壁纸层（CSS 背景不能渲染视频）。
+    // 不加 !important，主界面加载后由主进程机制接管（本元素会被移除）。
+    const v = document.createElement('video')
+    v.id = 'dsh-wallpaper-boot'
+    v.src = media
+    v.autoplay = true
+    v.loop = true
+    v.muted = true
+    v.playsInline = true
+    v.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1;pointer-events:none'
+    document.documentElement.appendChild(v)
+    report('WALLPAPER_BOOT_INJECTED')
+    return
+  }
+  // 图片：注入壁纸背景 CSS（无 !important，主界面机制可覆盖接管）
   const style = document.createElement('style')
   style.id = 'dsh-wallpaper-boot'
   style.textContent = `
-    html { background: ${bg} !important; }
-    body { background: transparent !important; }
+    html { background: ${bg}; }
+    body { background: transparent; }
     body::before {
-      content: '' !important;
-      position: fixed !important;
-      top: 0 !important;
-      left: 0 !important;
-      right: 0 !important;
-      bottom: 0 !important;
-      z-index: -1 !important;
-      pointer-events: none !important;
-      background: url('${media}') center/cover no-repeat !important;
-      filter: blur(${blur}px) !important;
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: -1;
+      pointer-events: none;
+      background: url('${media}') center/cover no-repeat;
+      filter: blur(${blur}px);
     }
   `
   document.documentElement.appendChild(style)

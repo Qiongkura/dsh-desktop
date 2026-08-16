@@ -1658,6 +1658,10 @@ function createWindow(url, wallpaper) {
     // 启动画面（file:// 壁纸页）不算 GUI 加载完成
     if (!win.webContents.getURL().startsWith(url)) return
     log(`page loaded: ${win.webContents.getURL()}`)
+    // 移除 preload 注入的启动壁纸层（style / video），由下方壁纸机制接管
+    win.webContents.executeJavaScript(
+      `(() => { const el = document.getElementById('dsh-wallpaper-boot'); if (el) el.remove(); return true })()`
+    ).catch(() => {})
     // 页面重载后 insertCSS 的 key 失效，必须重置才能重新注入
     wallpaperCssKey = null
     // 每次加载都重新读最新配置：对话框换图/清除后刷新，不能回退到启动时的旧图
