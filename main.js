@@ -445,12 +445,14 @@ function injectWallpaperCss(win) {
       border-radius: 22px !important;
       z-index: -1 !important;
       pointer-events: none !important;
-      /* 遮罩最高到输入栏上边界；顶部 20px 内部渐变丝滑过渡 */
+      /* 遮罩最高到输入栏上边界；顶部 20px 内部渐变丝滑过渡。
+         模糊用 --dsh-glass-blur（最低 10px），保证文字必糊，
+         不随壁纸模糊设置变得太弱 */
       background: linear-gradient(to bottom,
         transparent 0px,
         var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) 20px) !important;
-      backdrop-filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
-      -webkit-backdrop-filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
+      backdrop-filter: blur(var(--dsh-glass-blur, 10px)) !important;
+      -webkit-backdrop-filter: blur(var(--dsh-glass-blur, 10px)) !important;
     }
     /* 新会话(hero)界面：不渲染输入区毛玻璃，保持全透 */
     #root [data-phase='hero'] [class*='composerSeat']::before,
@@ -658,6 +660,8 @@ function applyWallpaper(win, wallpaper) {
     const dark = scheme === 'dark'
     window.__dshWallpaperTransparent = ${JSON.stringify(transparentFlags())}
     document.body.style.setProperty('--dsh-wallpaper-blur', '${wallpaperBlur()}px')
+    // 液态玻璃专用模糊：最低 10px，保证文字必糊
+    document.body.style.setProperty('--dsh-glass-blur', Math.max(10, ${wallpaperBlur()}) + 'px')
     document.body.style.setProperty('--dsh-wallpaper-code-alpha', '${wallpaperCodeAlpha()}')
     const applyVars = () => {
       const isDark = document.body.hasAttribute('data-ds-dark-theme')
@@ -724,6 +728,7 @@ function applyWallpaper(win, wallpaper) {
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel-border')
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel-hover')
       document.body.style.removeProperty('--dsh-wallpaper-blur')
+      document.body.style.removeProperty('--dsh-glass-blur')
       document.body.style.removeProperty('--dsh-wallpaper-code-alpha')
       document.body.style.removeProperty('--dsh-t-new-session')
       document.body.style.removeProperty('--dsh-t-composer-mask-url')
