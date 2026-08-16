@@ -427,15 +427,34 @@ function injectWallpaperCss(win) {
     /* 输入框区域：座位本身透明；::before 铺一层与主区视口对齐的壁纸
        （不透明），滚到输入框下方的聊天文字被完全盖住不显示，
        壁纸保持连续；伪元素滤镜只模糊自身，不影响输入内容。
-       遮罩向上延伸 44px（盖到座位上方滚动区）：文字在输入卡片上方
-       就渐隐完毕，卡片区域全程不透明，绝不会和文字重叠。
+       液态玻璃只在输入卡片正下方：宽度跟随卡片
+       （--dsh-composer-card-max-width，窄窗口收进两侧 16px 清空区），
+       居中、圆角与卡片一致；遮罩向上延伸 36px（文字在到达输入框前渐隐）。
        主界面不透明时 --dsh-t-composer-mask-url=none 撤销这层壁纸 */
     #root [class*='composerSeat'] {
       background: transparent !important;
+      /* 液态玻璃不贴窗口底边：输入框整体上移 12px */
+      bottom: 12px !important;
     }
     /* 视频壁纸毛玻璃：backdrop-filter 直接模糊 <video> 背景，
-       渐变背景从透明过渡到面板色，遮住滚动文字 */
+       渐变背景从透明过渡到面板色，遮住滚动文字；
+       同样只在输入卡片正下方（宽度跟随卡片） */
     body.dsh-video-wallpaper #root [class*='composerSeat'] {
+      background: transparent !important;
+      backdrop-filter: none !important;
+    }
+    body.dsh-video-wallpaper #root [class*='composerSeat']::after {
+      content: '' !important;
+      position: absolute !important;
+      top: 0 !important;
+      bottom: 0 !important;
+      left: 50% !important;
+      right: auto !important;
+      width: min(var(--dsh-composer-card-max-width, 800px), calc(100% - 32px)) !important;
+      transform: translateX(-50%) !important;
+      border-radius: 22px !important;
+      z-index: -1 !important;
+      pointer-events: none !important;
       background: linear-gradient(to bottom,
         transparent 0px,
         var(--dsh-wallpaper-panel, rgba(12,15,22,0.58)) 44px) !important;
@@ -445,7 +464,13 @@ function injectWallpaperCss(win) {
     #root [class*='composerSeat']::before {
       content: '' !important;
       position: absolute !important;
-      inset: -36px 0 0 0 !important;
+      top: -36px !important;
+      bottom: 0 !important;
+      left: 50% !important;
+      right: auto !important;
+      width: min(var(--dsh-composer-card-max-width, 800px), calc(100% - 32px)) !important;
+      transform: translateX(-50%) !important;
+      border-radius: 22px !important;
       z-index: -1 !important;
       pointer-events: none !important;
       background-image: var(--dsh-t-composer-mask-url, var(--dsh-wallpaper-url)) !important;
@@ -454,7 +479,7 @@ function injectWallpaperCss(win) {
       background-repeat: no-repeat !important;
       background-attachment: fixed !important;
       filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
-      /* 座位上方 24px 渐变：一点点丝滑过渡，文字在到达输入框前就消失 */
+      /* 座位上方渐变：一点点丝滑过渡，文字在到达输入框前就消失 */
       -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
       mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
     }
@@ -475,7 +500,8 @@ function injectWallpaperCss(win) {
       left: 0 !important;
       right: 0 !important;
       top: var(--dsh-sidebar-mask-top, 740px) !important;
-      bottom: 0 !important;
+      /* 与输入区同步：玻璃底部不贴窗口底边（上移 12px） */
+      bottom: 12px !important;
       z-index: 0 !important;
       pointer-events: none !important;
       background-image: var(--dsh-sidebar-fade-url, var(--dsh-wallpaper-url-sidebar, var(--dsh-wallpaper-url))) !important;
@@ -548,6 +574,14 @@ function setWallpaperVideoLayer(win, file) {
       s.textContent =
         'body.dsh-video-wallpaper #root [class*="composerSeat"]::before { display:none !important }' +
         'body.dsh-video-wallpaper #root [class*="composerSeat"] {' +
+        '  background:transparent !important;backdrop-filter:none !important;' +
+        '}' +
+        'body.dsh-video-wallpaper #root [class*="composerSeat"]::after {' +
+        '  content:"" !important;position:absolute !important;top:0 !important;bottom:0 !important;' +
+        '  left:50% !important;right:auto !important;' +
+        '  width:min(var(--dsh-composer-card-max-width,800px),calc(100% - 32px)) !important;' +
+        '  transform:translateX(-50%) !important;border-radius:22px !important;' +
+        '  z-index:-1 !important;pointer-events:none !important;' +
         '  background:linear-gradient(to bottom,transparent 0px,var(--dsh-wallpaper-panel,rgba(12,15,22,0.58)) 36px) !important;' +
         '  backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
         '  -webkit-backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
@@ -558,7 +592,7 @@ function setWallpaperVideoLayer(win, file) {
         '}' +
         'body.dsh-video-wallpaper #root [data-slot="root"] > div > div:first-child > [data-slot] > div::after {' +
         '  content:"" !important;position:absolute !important;left:0 !important;right:0 !important;' +
-        '  top:var(--dsh-sidebar-mask-top,740px) !important;bottom:0 !important;z-index:0 !important;pointer-events:none !important;' +
+        '  top:var(--dsh-sidebar-mask-top,740px) !important;bottom:12px !important;z-index:0 !important;pointer-events:none !important;' +
         '  background:linear-gradient(to bottom,transparent 0px,var(--dsh-wallpaper-panel,rgba(12,15,22,0.58)) 36px) !important;' +
         '  backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
         '  -webkit-backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
