@@ -724,9 +724,9 @@ function injectWallpaperCss(win) {
     #root [class*='newSession'] {
       background: var(--dsh-t-new-session, transparent) !important;
     }
-    /* 对话轨迹区（消息列表）液态玻璃：与输入框共用同一套代码/变量
+    /* 轨迹视图液态玻璃：与输入框共用同一套代码/变量
        （--dsh-glass-blur 模糊 + 面板色渐变），输入框模糊滑块同时控制两者 */
-    #root [data-conversation-scroll] {
+    #root [data-conversation-composer-overlay] {
       background: linear-gradient(to bottom,
         transparent 0px,
         var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) 24px) !important;
@@ -1881,19 +1881,21 @@ function createWindow(url, wallpaper) {
     // 启动画面（file:// 壁纸页）不算 GUI 加载完成
     if (!win.webContents.getURL().startsWith(url)) return
     log(`page loaded: ${win.webContents.getURL()}`)
-    // 临时探测：对话列/输入框容器（诊断用）
+    // 临时探测：轨迹视图/对话列（诊断用）
     win.webContents.executeJavaScript(`(() => {
       const out = {}
-      for (const sel of ['[data-conversation-scroll]', '[data-composer-seat]', '[class*="chat"]', '[class*="conversation"]', '[data-slot="root"]']) {
+      for (const sel of ['[data-conversation-composer-overlay]', '[data-conversation-scroll]', '[data-composer-seat]']) {
         const els = document.querySelectorAll(sel)
         out[sel] = els.length
         if (els.length > 0) {
           const e = els[0]
-          out[sel + ' cls'] = typeof e.className === 'string' ? e.className.slice(0, 80) : String(e.className)
+          out[sel + ' cls'] = typeof e.className === 'string' ? e.className.slice(0, 100) : String(e.className)
+          out[sel + ' tag'] = e.tagName
         }
       }
+      out.text = document.body.innerText.includes('Duration') || document.body.innerText.includes('轨迹')
       return out
-    })()`).then((r) => log('DOM probe: ' + JSON.stringify(r).slice(0, 1000))).catch((e) => log('DOM probe failed: ' + String(e)))
+    })()`).then((r) => log('DOM probe: ' + JSON.stringify(r).slice(0, 900))).catch((e) => log('DOM probe failed: ' + String(e)))
     // 启动层（#dsh-wallpaper-boot）由 preload 自管理：主界面渲染完成且
     // 满足最小展示时长后自行移除（duration>0 时媒体要播满，不能在此提前移除）
     // 页面重载后 insertCSS 的 key 失效，必须重置才能重新注入
