@@ -41,6 +41,8 @@ const media = payload.media || ''
 const bg = typeof payload.bg === 'string' && payload.bg !== '' ? payload.bg : '#101318'
 const mode = typeof payload.mode === 'string' && payload.mode !== '' ? payload.mode : 'default'
 const blur = Number.isFinite(Number(payload.blur)) ? Number(payload.blur) : 18
+// 启动画面最小展示秒数：主界面就绪后仍至少展示这么久（0 = 不强制）
+const minMs = Math.max(0, (Number.isFinite(Number(payload.duration)) ? Number(payload.duration) : 0) * 1000)
 
 const report = (msg) => { try { ipcRenderer.send('dsh:splash-cover-log', msg) } catch { /* 忽略 */ } }
 
@@ -69,29 +71,43 @@ const tryInject = () => {
     v.playsInline = true
     v.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1;pointer-events:none'
     document.documentElement.appendChild(v)
-    report('WALLPAPER_BOOT_INJECTED')
-    return
+  } else {
+    // 图片：注入壁纸背景 CSS（无 !important，主界面机制可覆盖接管）
+    const style = document.createElement('style')
+    style.id = 'dsh-wallpaper-boot'
+    style.textContent = `
+      html { background: ${bg}; }
+      body { background: transparent; }
+      body::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: -1;
+        pointer-events: none;
+        background: url('${media}') center/cover no-repeat;
+        filter: blur(${blur}px);
+      }
+    `
+    document.documentElement.appendChild(style)
   }
-  // 图片：注入壁纸背景 CSS（无 !important，主界面机制可覆盖接管）
-  const style = document.createElement('style')
-  style.id = 'dsh-wallpaper-boot'
-  style.textContent = `
-    html { background: ${bg}; }
-    body { background: transparent; }
-    body::before {
-      content: '';
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      z-index: -1;
-      pointer-events: none;
-      background: url('${media}') center/cover no-repeat;
-      filter: blur(${blur}px);
-    }
-  `
-  document.documentElement.appendChild(style)
   report('WALLPAPER_BOOT_INJECTED')
+  // 主界面渲染完成（输入框出现）且至少展示 minMs 后移除启动层；
+  // 20s 超时兜底。主进程 did-finish-load 不再提前移除（时长>0 时媒体要播满）。
+  const start = Date.now()
+  let tries = 0
+  const iv = setInterval(() => {
+    tries++
+    const ready = document.querySelector('[class*="composerSeat"]') || document.querySelector('textarea') || document.querySelector('[contenteditable="true"]')
+    const elapsed = Date.now() - start
+    if ((ready && elapsed >= minMs) || tries > 400) {
+      clearInterval(iv)
+      const el = document.getElementById('dsh-wallpaper-boot')
+      if (el !== null) el.remove()
+      report('REMOVED')
+    }
+  }, 50)
 }
 tryInject()
