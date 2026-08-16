@@ -79,18 +79,25 @@ const tryInject = () => {
     document.documentElement.appendChild(d)
   }
   report('WALLPAPER_BOOT_INJECTED')
-  // 主界面渲染完成（输入框出现）且至少展示 minMs 后移除启动层；
+  // 主界面渲染完成（输入框出现）且至少展示 minMs 后淡出移除启动层；
   // 20s 超时兜底。
   const start = Date.now()
   let tries = 0
+  let fading = false
   const iv = setInterval(() => {
     tries++
     const ready = document.querySelector('[class*="composerSeat"]') || document.querySelector('textarea') || document.querySelector('[contenteditable="true"]')
     const elapsed = Date.now() - start
-    if ((ready && elapsed >= minMs) || tries > 400) {
+    if (!fading && ((ready && elapsed >= minMs) || tries > 400)) {
       clearInterval(iv)
+      fading = true
       const el = document.getElementById('dsh-wallpaper-boot')
-      if (el !== null) el.remove()
+      if (el !== null) {
+        // 淡出后再移除，让主界面平滑浮现
+        el.style.transition = 'opacity .5s ease'
+        el.style.opacity = '0'
+        setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el) }, 500)
+      }
       report('REMOVED')
     }
   }, 50)
