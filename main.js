@@ -723,6 +723,24 @@ function injectWallpaperCss(win) {
     /* 侧栏"新对话"按钮：透明开关由 --dsh-t-new-session 控制 */
     #root [class*='newSession'] {
       background: var(--dsh-t-new-session, transparent) !important;
+    }
+    /* 轨迹界面液态玻璃：与输入框共用同一套代码/变量（--dsh-glass-blur 模糊 +
+       面板色渐变），输入框模糊滑块同时控制两者 */
+    #root [data-conversation-composer-overlay] {
+      background: transparent !important;
+      position: relative !important;
+    }
+    #root [data-conversation-composer-overlay]::before {
+      content: '' !important;
+      position: absolute !important;
+      inset: 0 !important;
+      z-index: -1 !important;
+      pointer-events: none !important;
+      background: linear-gradient(to bottom,
+        transparent 0px,
+        var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) 20px) !important;
+      backdrop-filter: blur(var(--dsh-glass-blur, 10px)) !important;
+      -webkit-backdrop-filter: blur(var(--dsh-glass-blur, 10px)) !important;
     }`
   wallpaperCssKey = win.webContents.insertCSS(css)
   wallpaperCssKey.catch(() => { wallpaperCssKey = null })
