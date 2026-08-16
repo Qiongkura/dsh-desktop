@@ -1521,10 +1521,11 @@ async function showWallpaperDialog() {
   dlg.once('ready-to-show', () => dlg.show())
   dlg.on('closed', () => {
     blurDialog = null
-    // 关闭设置后不让主窗口被 Windows 自动激活到最前（父子窗口行为），
-    // 避免"唤醒底下的界面"——主窗口失焦，焦点留在用户当前使用的窗口
+    // 点完成/取消后焦点回到主窗口，避免被其他软件抢走焦点
     if (mainWindow !== null && !mainWindow.isDestroyed()) {
-      mainWindow.blur()
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
     }
   })
   dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal, transparentOriginal, dialogDark, videoSoundOriginal, glassOriginal, Math.round(panelOriginal * 100), splashModeOriginal, splashFileOriginal === null ? '（无）' : path.basename(splashFileOriginal), splashDurationOriginal, splashFadeOriginal))}`)
