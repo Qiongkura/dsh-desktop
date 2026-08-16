@@ -458,13 +458,25 @@ function injectWallpaperCss(win) {
       -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
       mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
     }
-    /* 侧栏底部：把原 24px 主题渐隐层改为壁纸遮挡层——
-       会话列表滚到底部时，文字在顶部 24px 渐变区渐隐（与输入框同款），
-       下方被不透明壁纸盖住。
-       注意 treeBody 类名后还有附加类（_wide），必须用 [class*=treeBody] 匹配。
+    /* 侧栏底部遮罩：从侧栏底部到与主界面输入区同高（150px）——
+       面板根 ::after 铺壁纸层，盖住滚入底部的列表文字（顶部 36px 渐变），
+       footArea（设置/用量按钮）抬到 z-index 1 保持在遮罩之上。
        侧栏不透明时 --dsh-sidebar-fade-url=none 撤销这层 */
-    #root [data-slot='root'] > div > div:first-child [class*='treeBody'] [class$='fade'] {
-      height: 72px !important;
+    #root [data-slot='root'] > div > div:first-child > [data-slot] > div {
+      position: relative !important;
+    }
+    #root [data-slot='root'] > div > div:first-child [class$='footArea'] {
+      position: relative !important;
+      z-index: 1 !important;
+    }
+    #root [data-slot='root'] > div > div:first-child > [data-slot] > div::after {
+      content: '' !important;
+      position: absolute !important;
+      left: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      height: 150px !important;
+      z-index: 0 !important;
       pointer-events: none !important;
       background-image: var(--dsh-sidebar-fade-url, var(--dsh-wallpaper-url-sidebar, var(--dsh-wallpaper-url))) !important;
       background-position: center !important;
@@ -540,9 +552,13 @@ function setWallpaperVideoLayer(win, file) {
         '  backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
         '  -webkit-backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
         '}' +
-        // 视频模式下侧栏底部：与输入框同款毛玻璃渐隐（图片层的 ::before 方案已停用）
-        'body.dsh-video-wallpaper #root [data-slot="root"] > div > div:first-child [class*="treeBody"] [class$="fade"] {' +
-        '  height:72px !important;' +
+        // 视频模式下侧栏底部遮罩：与输入框同款毛玻璃渐隐（面板 ::after 方案）
+        'body.dsh-video-wallpaper #root [data-slot="root"] > div > div:first-child [class$="footArea"] {' +
+        '  position:relative !important;z-index:1 !important;' +
+        '}' +
+        'body.dsh-video-wallpaper #root [data-slot="root"] > div > div:first-child > [data-slot] > div::after {' +
+        '  content:"" !important;position:absolute !important;left:0 !important;right:0 !important;' +
+        '  bottom:0 !important;height:150px !important;z-index:0 !important;pointer-events:none !important;' +
         '  background:linear-gradient(to bottom,transparent 0px,var(--dsh-wallpaper-panel,rgba(12,15,22,0.58)) 36px) !important;' +
         '  backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
         '  -webkit-backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
