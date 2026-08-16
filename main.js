@@ -433,7 +433,7 @@ function showSplash(win, wallpaper) {
 /** GUI 加载期壁纸背景信息（preload 经 sendSync 读取）：
  *  { media: dsh-wallpaper:// URL 或 data URL, bg: 媒体主色, isVideo, mode, blur }
  *  由 armSplashCover 在创建主窗口时按当前启动画面模式计算。 */
-let splashCoverPayload = { media: '', bg: '#101318', isVideo: false, mode: 'default', blur: 18, duration: 0 }
+let splashCoverPayload = { media: '', bg: '#101318', isVideo: false, mode: 'default', blur: 18, duration: 0, fade: 0.5 }
 
 /** 壁纸式启动过渡：preload 在页面脚本执行前注入壁纸背景 CSS，
  *  页面（AppRoot）在 跟随主题/自定义 模式下加载期不渲染 HARNESS 卡片，
@@ -447,6 +447,7 @@ function armSplashCover(win, wallpaper) {
     mode: splashMode(),
     blur: wallpaperBlur(),
     duration: splashDuration(),
+    fade: splashFade(),
   }
 }
 
@@ -505,6 +506,12 @@ function configuredSplashFile() {
 function splashDuration() {
   const n = Number(loadConfig().splashDuration)
   return Number.isFinite(n) && n >= 0 && n <= 30 ? n : 0
+}
+
+/** 启动画面结束淡出秒数（0 = 直接切换），默认 0.5。 */
+function splashFade() {
+  const n = Number(loadConfig().splashFade)
+  return Number.isFinite(n) && n >= 0 && n <= 5 ? n : 0.5
 }
 
 /** 已注入的面板 CSS key（用于清除壁纸时移除）；壁纸层是 JS 创建的 div，可即时换图。 */
@@ -962,7 +969,7 @@ function configuredWallpaper() {
  *  @param sidebarImage 侧栏独立壁纸路径或 null（null = 共用主壁纸）；
  *  @param flags 各区域透明开关 {newSession,input,sidebar,main}；
  *  @param dark 是否深色主题（false = 浅色） */
-function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, dark = true, videoSound = false, glass = 10, panelPct = 55, splashMode = 'default', splashName = '（无）', splashDuration = 0) {
+function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, dark = true, videoSound = false, glass = 10, panelPct = 55, splashMode = 'default', splashName = '（无）', splashDuration = 0, splashFade = 0.5) {
   const imageName = image === null ? '（无）' : `${path.basename(image)}${isVideoWallpaper(image) ? '（视频）' : ''}`
   const sidebarName = sidebarImage === null ? '（无）' : `${path.basename(sidebarImage)}${isVideoWallpaper(sidebarImage) ? '（视频）' : ''}`
   const alphaPct = Math.round(codeAlpha * 100)
@@ -1123,6 +1130,12 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
         <span class="val" id="durationval">${splashDuration === 0 ? '0 秒（不等待）' : splashDuration + ' 秒'}</span>
       </div>
       <div class="desc" style="margin-top:6px;padding-left:104px">启动画面至少展示的秒数；0 = 不强制，加载完成即进入主界面（仅默认外的模式生效）。</div>
+      <div class="row" style="margin-top:14px">
+        <span class="label">淡出时长</span>
+        <input type="range" id="fade" min="0" max="2" step="0.1" value="${splashFade}">
+        <span class="val" id="fadeval">${splashFade === 0 ? '0 秒（直接切换）' : splashFade + ' 秒'}</span>
+      </div>
+      <div class="desc" style="margin-top:6px;padding-left:104px">启动画面结束时的渐隐时长；0 = 直接切换。</div>
     </div>
     <div class="footer">
       <button class="btn btn-ghost" id="reset">恢复默认</button>
@@ -1162,6 +1175,12 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
     durationEl.addEventListener('input', () => {
       const v = Number(durationEl.value)
       durationVal.textContent = v === 0 ? '0 秒（不等待）' : v + ' 秒'
+    })
+    const fadeEl = document.getElementById('fade')
+    const fadeVal = document.getElementById('fadeval')
+    fadeEl.addEventListener('input', () => {
+      const v = Number(fadeEl.value)
+      fadeVal.textContent = v === 0 ? '0 秒（直接切换）' : v + ' 秒'
     })
     const glassEl = document.getElementById('glass')
     const glassVal = document.getElementById('glassval')
@@ -1230,10 +1249,10 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
       splashNameEl.textContent = file === null ? '（无）' : file.split(/[\\\\/]/).pop()
     })
     document.getElementById('cancel').addEventListener('click', () => api.commit({ ok: false }))
-    document.getElementById('ok').addEventListener('click', () => api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags(), videoSound: vSoundEl.checked, glassBlur: Number(glassEl.value), panelAlpha: Number(panelEl.value) / 100, splashMode: splashModeDraft, duration: Number(durationEl.value) }))
+    document.getElementById('ok').addEventListener('click', () => api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags(), videoSound: vSoundEl.checked, glassBlur: Number(glassEl.value), panelAlpha: Number(panelEl.value) / 100, splashMode: splashModeDraft, duration: Number(durationEl.value), fade: Number(fadeEl.value) }))
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') api.commit({ ok: false })
-      else if (event.key === 'Enter') api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags(), videoSound: vSoundEl.checked, glassBlur: Number(glassEl.value), panelAlpha: Number(panelEl.value) / 100, splashMode: splashModeDraft, duration: Number(durationEl.value) })
+      else if (event.key === 'Enter') api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags(), videoSound: vSoundEl.checked, glassBlur: Number(glassEl.value), panelAlpha: Number(panelEl.value) / 100, splashMode: splashModeDraft, duration: Number(durationEl.value), fade: Number(fadeEl.value) })
     })
     preview()
   </script>
@@ -1256,6 +1275,7 @@ let panelOriginal = 0.55 // 对话框打开时的面板透明度
 let splashModeOriginal = 'default' // 对话框打开时的启动画面模式
 let splashFileOriginal = null // 对话框打开时的启动素材
 let splashDurationOriginal = 0 // 对话框打开时的启动画面最小展示秒数
+let splashFadeOriginal = 0.5 // 对话框打开时的启动画面淡出秒数
 let splashFileDraft = null // 对话框内启动素材草稿
 
 /** 恢复对话框打开前的壁纸状态（取消时）。 */
@@ -1327,10 +1347,11 @@ async function showWallpaperDialog() {
   splashModeOriginal = splashMode()
   splashFileOriginal = configuredSplashFile()
   splashDurationOriginal = splashDuration()
+  splashFadeOriginal = splashFade()
   splashFileDraft = splashFileOriginal
   const dlg = new BrowserWindow({
     width: 460,
-    height: 690,
+    height: 740,
     show: false,
     frame: false,
     // 置顶：不被主窗口的对话轨迹/输入框遮住
@@ -1356,7 +1377,7 @@ async function showWallpaperDialog() {
   dlg.on('closed', () => {
     blurDialog = null
   })
-  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal, transparentOriginal, dialogDark, videoSoundOriginal, glassOriginal, Math.round(panelOriginal * 100), splashModeOriginal, splashFileOriginal === null ? '（无）' : path.basename(splashFileOriginal), splashDurationOriginal))}`)
+  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal, transparentOriginal, dialogDark, videoSoundOriginal, glassOriginal, Math.round(panelOriginal * 100), splashModeOriginal, splashFileOriginal === null ? '（无）' : path.basename(splashFileOriginal), splashDurationOriginal, splashFadeOriginal))}`)
 }
 
 // 滑块/开关实时预览（模糊 + 代码块透明度 + 区域透明开关 + 视频声音 + 玻璃模糊 + 面板透明度）
@@ -1572,6 +1593,10 @@ ipcMain.on('dsh:wallpaper-commit', (_event, payload) => {
     if (payload.duration !== undefined) {
       const d = Number(payload.duration)
       cfg.splashDuration = Number.isFinite(d) ? Math.max(0, Math.min(30, d)) : 0
+    }
+    if (payload.fade !== undefined) {
+      const f = Number(payload.fade)
+      cfg.splashFade = Number.isFinite(f) ? Math.max(0, Math.min(5, f)) : 0.5
     }
     if (splashFileDraft === null) cfg.splashFile = undefined
     else cfg.splashFile = splashFileDraft

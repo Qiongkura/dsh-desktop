@@ -43,6 +43,8 @@ const mode = typeof payload.mode === 'string' && payload.mode !== '' ? payload.m
 const blur = Number.isFinite(Number(payload.blur)) ? Number(payload.blur) : 18
 // 启动画面最小展示秒数：主界面就绪后仍至少展示这么久（0 = 不强制）
 const minMs = Math.max(0, (Number.isFinite(Number(payload.duration)) ? Number(payload.duration) : 0) * 1000)
+// 结束淡出毫秒数（0 = 直接切换，默认 0.5s）
+const fadeMs = Math.max(0, (Number.isFinite(Number(payload.fade)) ? Number(payload.fade) : 0.5) * 1000)
 
 const report = (msg) => { try { ipcRenderer.send('dsh:splash-cover-log', msg) } catch { /* 忽略 */ } }
 
@@ -94,9 +96,9 @@ const tryInject = () => {
       const el = document.getElementById('dsh-wallpaper-boot')
       if (el !== null) {
         // 淡出后再移除，让主界面平滑浮现
-        el.style.transition = 'opacity .5s ease'
+        el.style.transition = `opacity ${fadeMs}ms ease`
         el.style.opacity = '0'
-        setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el) }, 500)
+        setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el) }, fadeMs)
       }
       report('REMOVED')
     }
