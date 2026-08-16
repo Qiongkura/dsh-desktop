@@ -395,9 +395,13 @@ function showSplash(win, wallpaper) {
 function armSplashCover(win, wallpaper) {
   let active = false
   win.webContents.on('did-dom-ready', () => {
+    log(`splash cover: did-dom-ready (active=${active}, url=${win.webContents.getURL()})`)
     if (active || win.isDestroyed()) return
     const { media, isVideo } = resolveSplashMedia(wallpaper)
-    if (media === null) return
+    if (media === null) {
+      log('splash cover: no media, skipping')
+      return
+    }
     active = true
     const cover = isVideo
       ? `<video autoplay loop muted playsinline src="${media}" style="width:100%;height:100%;object-fit:cover"></video>`
@@ -420,7 +424,7 @@ function armSplashCover(win, wallpaper) {
         }
       }, 50);
     })()`
-    win.webContents.executeJavaScript(js).catch(() => { active = false })
+    win.webContents.executeJavaScript(js).then(() => log('splash cover: injected')).catch((e) => { log('splash cover: inject failed:', String(e)); active = false })
   })
 }
 
