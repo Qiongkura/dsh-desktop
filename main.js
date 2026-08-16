@@ -1082,7 +1082,7 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
     overflow: hidden;
   }
   .body { padding: 18px 20px 0; }
-  .title { font-size: 14px; line-height: 20px; font-weight: 600; }
+  .title { font-size: 14px; line-height: 20px; font-weight: 600; padding: 10px 0 8px; }
   .desc { margin-top: 4px; font-size: 12px; line-height: 18px; color: var(--label-secondary); }
   .row { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
   .row .label { width: 92px; font-size: 12px; color: var(--label-secondary); flex: none; }
@@ -1128,7 +1128,7 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
 <body>
   <div class="card">
     <div class="body">
-      <div class="title">界面设置</div>
+      <div class="title" style="-webkit-app-region: drag; cursor: move;">界面设置</div>
       <div class="imgrow">
         <span class="label">壁纸图片/视频</span>
         <span class="imgname" id="imgname">${imageName}</span>
@@ -1514,7 +1514,8 @@ ipcMain.on('dsh:wallpaper-pick-image', async (_event) => {
   const win = mainWindow
   const dlg = blurDialog
   if (win === null || win.isDestroyed() || dlg === null || dlg.isDestroyed()) return
-  const result = await dialog.showOpenDialog(win, {
+  // parent 用设置对话框：文件选择器模态于其上，置顶的设置框不会盖住它
+  const result = await dialog.showOpenDialog(dlg, {
     title: '选择壁纸图片或视频',
     properties: ['openFile'],
     filters: [
@@ -1559,7 +1560,8 @@ ipcMain.on('dsh:wallpaper-pick-sidebar-image', async (_event) => {
   const win = mainWindow
   const dlg = blurDialog
   if (win === null || win.isDestroyed() || dlg === null || dlg.isDestroyed()) return
-  const result = await dialog.showOpenDialog(win, {
+  // parent 用设置对话框：文件选择器模态于其上，置顶的设置框不会盖住它
+  const result = await dialog.showOpenDialog(dlg, {
     title: '选择侧栏壁纸图片或视频',
     properties: ['openFile'],
     filters: [
@@ -1617,7 +1619,8 @@ ipcMain.on('dsh:wallpaper-pick-splash', async (_event, mode) => {
   const win = mainWindow
   const dlg = blurDialog
   if (win === null || win.isDestroyed() || dlg === null || dlg.isDestroyed()) return
-  const result = await dialog.showOpenDialog(win, {
+  // parent 用设置对话框：文件选择器模态于其上，置顶的设置框不会盖住它
+  const result = await dialog.showOpenDialog(dlg, {
     title: '选择启动素材',
     properties: ['openFile'],
     filters: [
