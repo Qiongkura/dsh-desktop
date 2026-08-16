@@ -445,7 +445,7 @@ function injectWallpaperCss(win) {
     #root [class*='composerSeat']::before {
       content: '' !important;
       position: absolute !important;
-      inset: -24px 0 0 0 !important;
+      inset: -36px 0 0 0 !important;
       z-index: -1 !important;
       pointer-events: none !important;
       background-image: var(--dsh-t-composer-mask-url, var(--dsh-wallpaper-url)) !important;
@@ -455,8 +455,8 @@ function injectWallpaperCss(win) {
       background-attachment: fixed !important;
       filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
       /* 座位上方 24px 渐变：一点点丝滑过渡，文字在到达输入框前就消失 */
-      -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 24px) !important;
-      mask-image: linear-gradient(to bottom, transparent 0px, black 24px) !important;
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
+      mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
     }
     /* 侧栏底部：把原 24px 主题渐隐层改为壁纸遮挡层——
        会话列表滚到底部时，文字在顶部 24px 渐变区渐隐（与输入框同款），
@@ -472,8 +472,8 @@ function injectWallpaperCss(win) {
       background-repeat: no-repeat !important;
       background-attachment: var(--dsh-sidebar-attachment, fixed) !important;
       filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
-      -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 24px) !important;
-      mask-image: linear-gradient(to bottom, transparent 0px, black 24px) !important;
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
+      mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
     }
     /* 侧栏"新对话"按钮：透明开关由 --dsh-t-new-session 控制 */
     #root [class*='newSession'] {
