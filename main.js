@@ -445,7 +445,7 @@ function injectWallpaperCss(win) {
     #root [class*='composerSeat']::before {
       content: '' !important;
       position: absolute !important;
-      inset: -20px 0 0 0 !important;
+      inset: -24px 0 0 0 !important;
       z-index: -1 !important;
       pointer-events: none !important;
       background-image: var(--dsh-t-composer-mask-url, var(--dsh-wallpaper-url)) !important;
@@ -454,15 +454,16 @@ function injectWallpaperCss(win) {
       background-repeat: no-repeat !important;
       background-attachment: fixed !important;
       filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
-      /* 座位上方 20px 渐变：一点点丝滑过渡，文字在到达输入框前就消失 */
-      -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 20px) !important;
-      mask-image: linear-gradient(to bottom, transparent 0px, black 20px) !important;
+      /* 座位上方 24px 渐变：一点点丝滑过渡，文字在到达输入框前就消失 */
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 24px) !important;
+      mask-image: linear-gradient(to bottom, transparent 0px, black 24px) !important;
     }
     /* 侧栏底部：把原 24px 主题渐隐层改为壁纸遮挡层——
-       会话列表滚到底部时，文字在顶部 20px 渐变区渐隐（与输入框同款），
+       会话列表滚到底部时，文字在顶部 24px 渐变区渐隐（与输入框同款），
        下方被不透明壁纸盖住。
+       注意 treeBody 类名后还有附加类（_wide），必须用 [class*=treeBody] 匹配。
        侧栏不透明时 --dsh-sidebar-fade-url=none 撤销这层 */
-    #root [data-slot='root'] > div > div:first-child [class$='treeBody'] [class$='fade'] {
+    #root [data-slot='root'] > div > div:first-child [class*='treeBody'] [class$='fade'] {
       height: 72px !important;
       pointer-events: none !important;
       background-image: var(--dsh-sidebar-fade-url, var(--dsh-wallpaper-url-sidebar, var(--dsh-wallpaper-url))) !important;
@@ -471,8 +472,8 @@ function injectWallpaperCss(win) {
       background-repeat: no-repeat !important;
       background-attachment: var(--dsh-sidebar-attachment, fixed) !important;
       filter: blur(var(--dsh-wallpaper-blur, 18px)) !important;
-      -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 20px) !important;
-      mask-image: linear-gradient(to bottom, transparent 0px, black 20px) !important;
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 24px) !important;
+      mask-image: linear-gradient(to bottom, transparent 0px, black 24px) !important;
     }
     /* 侧栏"新对话"按钮：透明开关由 --dsh-t-new-session 控制 */
     #root [class*='newSession'] {
