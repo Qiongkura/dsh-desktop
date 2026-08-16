@@ -458,8 +458,9 @@ function injectWallpaperCss(win) {
       -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
       mask-image: linear-gradient(to bottom, transparent 0px, black 36px) !important;
     }
-    /* 侧栏底部遮罩：从侧栏底部到与主界面输入区同高（150px）——
-       面板根 ::after 铺壁纸层，盖住滚入底部的列表文字（顶部 36px 渐变），
+    /* 侧栏底部遮罩：与主界面输入区同高（高度由 applyVars 动态测量
+       composerSeat 得到，--dsh-sidebar-mask-h）——从侧栏底部到与输入区
+       顶部对齐，顶部 36px 渐变，盖住滚入底部的列表文字；
        footArea（设置/用量按钮）抬到 z-index 1 保持在遮罩之上。
        侧栏不透明时 --dsh-sidebar-fade-url=none 撤销这层 */
     #root [data-slot='root'] > div > div:first-child > [data-slot] > div {
@@ -475,7 +476,7 @@ function injectWallpaperCss(win) {
       left: 0 !important;
       right: 0 !important;
       bottom: 0 !important;
-      height: 150px !important;
+      height: var(--dsh-sidebar-mask-h, 150px) !important;
       z-index: 0 !important;
       pointer-events: none !important;
       background-image: var(--dsh-sidebar-fade-url, var(--dsh-wallpaper-url-sidebar, var(--dsh-wallpaper-url))) !important;
@@ -558,7 +559,7 @@ function setWallpaperVideoLayer(win, file) {
         '}' +
         'body.dsh-video-wallpaper #root [data-slot="root"] > div > div:first-child > [data-slot] > div::after {' +
         '  content:"" !important;position:absolute !important;left:0 !important;right:0 !important;' +
-        '  bottom:0 !important;height:150px !important;z-index:0 !important;pointer-events:none !important;' +
+        '  bottom:0 !important;height:var(--dsh-sidebar-mask-h,150px) !important;z-index:0 !important;pointer-events:none !important;' +
         '  background:linear-gradient(to bottom,transparent 0px,var(--dsh-wallpaper-panel,rgba(12,15,22,0.58)) 36px) !important;' +
         '  backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
         '  -webkit-backdrop-filter:blur(var(--dsh-wallpaper-blur,18px)) !important;' +
@@ -748,9 +749,13 @@ function applyWallpaper(win, wallpaper) {
       // 视频壁纸通过 body.dsh-video-wallpaper + backdrop-filter 实现毛玻璃，不依赖此变量
       if (T.main) document.body.style.removeProperty('--dsh-t-composer-mask-url')
       else document.body.style.setProperty('--dsh-t-composer-mask-url', 'none')
-      // 侧栏底部壁纸遮挡层：侧栏不透明时撤销
+      // 侧栏底部壁纸遮挡层：侧栏不透明时撤销；高度跟随主界面输入区
       if (T.sidebar) document.body.style.removeProperty('--dsh-sidebar-fade-url')
       else document.body.style.setProperty('--dsh-sidebar-fade-url', 'none')
+      const seat = document.querySelector('[class*="composerSeat"]')
+      if (seat !== null) {
+        document.body.style.setProperty('--dsh-sidebar-mask-h', seat.getBoundingClientRect().height + 'px')
+      }
       // 侧栏滚动渐隐终点色：保持透明（让背景透出），不随开关恢复
       document.body.style.setProperty('--dsw-specific-sidebar-fill', 'transparent')
       // 代码块/行内代码透明度
@@ -790,6 +795,7 @@ function applyWallpaper(win, wallpaper) {
       document.body.style.removeProperty('--dsh-t-new-session')
       document.body.style.removeProperty('--dsh-t-composer-mask-url')
       document.body.style.removeProperty('--dsh-sidebar-fade-url')
+      document.body.style.removeProperty('--dsh-sidebar-mask-h')
     }
     return JSON.stringify({ scheme, blur: ${wallpaperBlur()}, codeAlpha: ${wallpaperCodeAlpha()}, transparent: ${JSON.stringify(transparentFlags())} })
   })()`).then((state) => {
