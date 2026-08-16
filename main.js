@@ -749,12 +749,16 @@ function applyWallpaper(win, wallpaper) {
       // 视频壁纸通过 body.dsh-video-wallpaper + backdrop-filter 实现毛玻璃，不依赖此变量
       if (T.main) document.body.style.removeProperty('--dsh-t-composer-mask-url')
       else document.body.style.setProperty('--dsh-t-composer-mask-url', 'none')
-      // 侧栏底部壁纸遮挡层：侧栏不透明时撤销；高度跟随主界面输入区
+      // 侧栏底部壁纸遮挡层：侧栏不透明时撤销；
+      // 高度 = 主界面输入区顶部到窗口底的距离 + 36px 渐变区，
+      // 使两侧遮罩/渐变最高点完全对齐
       if (T.sidebar) document.body.style.removeProperty('--dsh-sidebar-fade-url')
       else document.body.style.setProperty('--dsh-sidebar-fade-url', 'none')
       const seat = document.querySelector('[class*="composerSeat"]')
       if (seat !== null) {
-        document.body.style.setProperty('--dsh-sidebar-mask-h', seat.getBoundingClientRect().height + 'px')
+        const top = seat.getBoundingClientRect().top
+        const h = window.innerHeight - top + 36
+        document.body.style.setProperty('--dsh-sidebar-mask-h', h + 'px')
       }
       // 侧栏滚动渐隐终点色：保持透明（让背景透出），不随开关恢复
       document.body.style.setProperty('--dsw-specific-sidebar-fill', 'transparent')
@@ -768,7 +772,20 @@ function applyWallpaper(win, wallpaper) {
     }
     applyVars()
     window.__dshApplyWallpaperVars = applyVars
+    // 窗口尺寸变化时重新对齐侧栏遮罩高度
+    window.__dshResyncMask = () => {
+      const seat = document.querySelector('[class*="composerSeat"]')
+      if (seat !== null) {
+        const top = seat.getBoundingClientRect().top
+        document.body.style.setProperty('--dsh-sidebar-mask-h', (window.innerHeight - top + 36) + 'px')
+      }
+    }
+    window.addEventListener('resize', window.__dshResyncMask)
     window.__dshWallpaperCleanup = () => {
+      if (typeof window.__dshResyncMask === 'function') {
+        window.removeEventListener('resize', window.__dshResyncMask)
+        window.__dshResyncMask = null
+      }
       document.body.style.removeProperty('--dsh-wallpaper-url')
       document.body.classList.remove('dsh-video-wallpaper')
       const css = document.getElementById('dsh-video-composer-css')
