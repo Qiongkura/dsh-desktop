@@ -1103,7 +1103,11 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
     overflow: hidden;
   }
   .body { padding: 18px 20px 0; }
-  .title { font-size: 14px; line-height: 20px; font-weight: 600; padding: 10px 0 8px; }
+  .title { font-size: 14px; line-height: 20px; font-weight: 600; padding: 10px 0 8px;
+           -webkit-app-region: drag; cursor: move; }
+  /* 顶部全宽拖拽条：标题上方 padding 区域也可拖动窗口 */
+  .dragbar { position: fixed; top: 0; left: 0; right: 0; height: 30px;
+             -webkit-app-region: drag; cursor: move; z-index: 10; }
   .desc { margin-top: 4px; font-size: 12px; line-height: 18px; color: var(--label-secondary); }
   .row { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
   .row .label { width: 92px; font-size: 12px; color: var(--label-secondary); flex: none; }
@@ -1133,7 +1137,7 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
            color: var(--label-secondary); cursor: pointer; white-space: nowrap; }
   .check input { accent-color: var(--accent); width: 13px; height: 13px; margin: 0; cursor: pointer; }
   .footer { margin-top: auto; display: flex; justify-content: flex-end; align-items: center;
-            gap: 10px; padding: 16px 20px 18px; }
+            gap: 10px; padding: 24px 24px 28px; }
   .btn {
     height: 32px; padding: 0 16px; border-radius: 16px; border: 1px solid transparent;
     background: transparent; color: var(--label-primary); font-size: 12px; font-weight: 500;
@@ -1147,6 +1151,7 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
 </style>
 </head>
 <body>
+  <div class="dragbar"></div>
   <div class="card">
     <div class="body">
       <div class="title" style="-webkit-app-region: drag; cursor: move;">界面设置</div>
@@ -1449,7 +1454,7 @@ async function showWallpaperDialog() {
   splashFileDraft = splashFileOriginal
   const dlg = new BrowserWindow({
     width: 460,
-    height: 740,
+    height: 780,
     show: false,
     frame: false,
     // 置顶：不被主窗口的对话轨迹/输入框遮住
