@@ -1692,9 +1692,9 @@ function createWindow(url, wallpaper) {
     }
   })
 
-  // 启动画面先行（file:// 页），后端就绪后由启动流程调用 loadURL 切换 GUI。
-  // 默认模式不显示启动画面：直接用 DSH 原生的 HARNESS 加载界面。
-  if (splashMode() !== 'default') showSplash(win, wallpaper)
+  // 启动画面由 GUI 页面内的 preload 壁纸/视频层承担（loadURL 后立即出现），
+  // 不再提前 loadFile splash.html——避免"启动动画播一遍、页面加载期又播一遍"
+  // 的两段式过程。等待后端期间窗口不显示（GUI 渲染后经 ready-to-show 出现）。
   mainWindow = win
   return win
 }
@@ -2159,26 +2159,11 @@ if (!gotLock) {
     // 后端就绪后由下方 loadURL 切换到 GUI
     const win = createWindow(url, wallpaper)
 
-    // 默认模式无启动画面（直接用 HARNESS 加载界面）：窗口在 GUI 渲染后经
-    // ready-to-show 显示；若后端启动慢（自起场景），8s 后强制显示品牌等待页。
-    if (splashMode() === 'default') {
-      setTimeout(() => {
-        if (!win.isDestroyed() && !win.isVisible()) showSplash(win, wallpaper)
-      }, 8000)
-    }
-
-    // 启动画面最小展示时间（仅非默认模式）：file:// 加载快，且 3080 已有服务时
-    // attach 是秒连的，不加最小时间用户会看不到启动画面。
-    if (splashMode() !== 'default') {
-      const t0 = Date.now()
-      const remain = () => Math.max(0, 1500 - (Date.now() - t0))
-      await new Promise((resolve) => {
-        let done = false
-        const finish = () => { if (!done) { done = true; resolve() } }
-        win.webContents.once('did-finish-load', () => setTimeout(finish, remain()))
-        setTimeout(finish, 1500)
-      })
-    }
+    // 等待后端期间窗口不显示；后端启动慢时（自起场景）8s 后强制显示启动画面，
+    // 避免看起来像没启动。attach 秒连场景无此等待，直接由 preload 层承接启动画面。
+    setTimeout(() => {
+      if (!win.isDestroyed() && !win.isVisible()) showSplash(win, wallpaper)
+    }, 8000)
 
     const noServer = process.argv.includes('--no-server')
     if (!noServer) {
