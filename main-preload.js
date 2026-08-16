@@ -63,6 +63,7 @@ const tryInject = () => {
   // 启动层盖在最顶层（z-index 最大）：主界面在下面加载但不可见，
   // 展示满 minMs（或主界面就绪且 minMs=0）后移除，主界面才出现。
   const isVideo = payload.isVideo === true || /\.(mp4|m4v|webm|mov|ogv)(\?|#|$)/i.test(media)
+  let bootEl = null
   if (isVideo) {
     const v = document.createElement('video')
     v.id = 'dsh-wallpaper-boot'
@@ -71,17 +72,22 @@ const tryInject = () => {
     v.loop = true
     v.muted = true
     v.playsInline = true
-    v.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:2147483647'
+    v.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:2147483647;cursor:pointer'
     document.documentElement.appendChild(v)
+    bootEl = v
   } else {
     // 图片：全屏 div，背景先主色（加载期无黑），图片就绪后覆盖
     const d = document.createElement('div')
     d.id = 'dsh-wallpaper-boot'
-    d.style.cssText = `position:fixed;inset:0;z-index:2147483647;background:${bg} center/cover no-repeat;background-image:url('${media}');filter:blur(${blur}px)`
+    d.style.cssText = `position:fixed;inset:0;z-index:2147483647;cursor:pointer;background:${bg} center/cover no-repeat;background-image:url('${media}');filter:blur(${blur}px)`
     document.documentElement.appendChild(d)
+    bootEl = d
   }
   report('WALLPAPER_BOOT_INJECTED')
-  // 主界面渲染完成（输入框出现）且至少展示 minMs 后淡出移除启动层；
+  // 点击任意位置跳过剩余展示（主界面已加载好时立即进入）
+  let skip = false
+  bootEl.addEventListener('click', () => { skip = true })
+  // 主界面渲染完成（输入框出现）且至少展示 minMs（或点击跳过）后淡出移除启动层；
   // 20s 超时兜底。
   const start = Date.now()
   let tries = 0
@@ -90,7 +96,7 @@ const tryInject = () => {
     tries++
     const ready = document.querySelector('[class*="composerSeat"]') || document.querySelector('textarea') || document.querySelector('[contenteditable="true"]')
     const elapsed = Date.now() - start
-    if (!fading && ((ready && elapsed >= minMs) || tries > 400)) {
+    if (!fading && ((ready && (elapsed >= minMs || skip)) || tries > 400)) {
       clearInterval(iv)
       fading = true
       const el = document.getElementById('dsh-wallpaper-boot')
