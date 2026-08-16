@@ -3,12 +3,11 @@
 /**
  * 主窗口 preload：
  *  1. 一体化标题栏能力（最小化/最大化/关闭、返回/前进、菜单）——原 titlebar/preload.js；
- *  2. 启动画面无缝过渡：在页面脚本执行之前（documentElement 一出现）注入全屏
- *     覆盖层（启动画面媒体），主界面渲染完成（输入框出现）后淡出移除——
- *     GUI 加载期间的 DSH 加载界面（HARNESS / Loading plugins...）不会露出来。
+ *  2. 壁纸式启动过渡：页面脚本执行前注入壁纸背景 CSS（dsh-wallpaper:// 媒体），
+ *     并通过 contextBridge 暴露启动画面模式——页面在 跟随主题/自定义 模式下
+ *     加载期间不渲染 HARNESS 加载卡片，壁纸从启动到主界面全程连续显示。
  *
- * 覆盖层只对 http(s) 页面生效：splash.html 是 file://，自动跳过。
- * 媒体 URL 经 sendSync 从主进程取（dsh-wallpaper:// 纯字符串，无文件 IO）。
+ * 壁纸背景只对 http(s) 页面注入：splash.html 是 file://，对话框是 data:，自动跳过。
  */
 
 const { contextBridge, ipcRenderer } = require('electron')
@@ -32,7 +31,7 @@ contextBridge.exposeInMainWorld('dshTitlebar', {
   onMenuData: (cb) => ipcRenderer.on('dsh:tb-menu-data', (_event, payload) => cb(payload)),
 })
 
-// ------------------------------------------------------------ 启动画面覆盖层 --
+// ------------------------------------------------------------ 壁纸式启动过渡 --
 
 let payload = {}
 try {
@@ -40,49 +39,44 @@ try {
 } catch { /* 主进程未就绪时忽略 */ }
 const media = payload.media || ''
 const bg = typeof payload.bg === 'string' && payload.bg !== '' ? payload.bg : '#101318'
-if (media === '') return
-if (typeof location !== 'undefined' && location.protocol !== 'http:' && location.protocol !== 'https:') return
+const mode = typeof payload.mode === 'string' && payload.mode !== '' ? payload.mode : 'default'
+const blur = Number.isFinite(Number(payload.blur)) ? Number(payload.blur) : 18
 
 const report = (msg) => { try { ipcRenderer.send('dsh:splash-cover-log', msg) } catch { /* 忽略 */ } }
-report('PRELOAD_RAN')
 
-const isVideo = payload.isVideo === true || /\.(mp4|m4v|webm|mov|ogv)(\?|#|$)/i.test(media)
+// 暴露启动画面模式给页面（AppRoot 据此决定加载期是否渲染 HARNESS 卡片）
+contextBridge.exposeInMainWorld('dshSplashMode', mode)
+
+// 无媒体（默认模式）或非 http(s) 页面：不注入壁纸背景
+if (media === '') return
+if (typeof location !== 'undefined' && location.protocol !== 'http:' && location.protocol !== 'https:') return
 
 const tryInject = () => {
   if (!document || !document.documentElement) {
     setTimeout(tryInject, 5)
     return
   }
-  const d = document.createElement('div')
-  d.id = 'dsh-splash-cover'
-  d.style.cssText = `position:fixed;inset:0;z-index:2147483647;background:${bg};overflow:hidden`
-  d.innerHTML = isVideo
-    ? `<video autoplay loop muted playsinline src="${media}" style="width:100%;height:100%;object-fit:cover"></video>`
-    : `<img src="${media}" style="width:100%;height:100%;object-fit:cover">`
-  document.documentElement.appendChild(d)
-  report('INJECTED')
-  const m = d.querySelector('img, video')
-  if (m) {
-    if (m instanceof HTMLVideoElement) {
-      m.addEventListener('loadedmetadata', () => report('VIDEO_METADATA'))
-      m.addEventListener('canplay', () => report('VIDEO_CANPLAY'))
-      m.addEventListener('playing', () => report('VIDEO_PLAYING'))
-      m.addEventListener('error', () => report('VIDEO_ERROR'))
-    } else {
-      m.addEventListener('load', () => report('MEDIA_LOADED'))
-      m.addEventListener('error', () => report('MEDIA_ERROR'))
+  // 壁纸背景：页面加载期（HARNESS 卡片不渲染时）直接显示媒体；
+  // 主界面加载完成后由主进程的 injectWallpaperCss 接管（后注入覆盖同规则）
+  const style = document.createElement('style')
+  style.id = 'dsh-wallpaper-boot'
+  style.textContent = `
+    html { background: ${bg} !important; }
+    body { background: transparent !important; }
+    body::before {
+      content: '' !important;
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      z-index: -1 !important;
+      pointer-events: none !important;
+      background: url('${media}') center/cover no-repeat !important;
+      filter: blur(${blur}px) !important;
     }
-  }
-  let tries = 0
-  const iv = setInterval(() => {
-    tries++
-    const ready = document.querySelector('[class*="composerSeat"]') || document.querySelector('textarea') || document.querySelector('[contenteditable="true"]')
-    if (ready || tries > 400) {
-      clearInterval(iv)
-      d.style.transition = 'opacity .35s ease'
-      d.style.opacity = '0'
-      setTimeout(() => { if (d.parentNode) d.parentNode.removeChild(d); report('REMOVED') }, 400)
-    }
-  }, 50)
+  `
+  document.documentElement.appendChild(style)
+  report('WALLPAPER_BOOT_INJECTED')
 }
 tryInject()

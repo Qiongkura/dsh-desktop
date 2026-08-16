@@ -430,32 +430,22 @@ function showSplash(win, wallpaper) {
   } catch { /* 壁纸失败不阻塞启动 */ }
 }
 
-/** GUI 加载期覆盖层信息（preload 经 sendSync 读取）：
- *  { media: dsh-wallpaper:// URL, bg: 媒体主色（加载期背景）, isVideo }
+/** GUI 加载期壁纸背景信息（preload 经 sendSync 读取）：
+ *  { media: dsh-wallpaper:// URL 或 data URL, bg: 媒体主色, isVideo, mode, blur }
  *  由 armSplashCover 在创建主窗口时按当前启动画面模式计算。 */
-let splashCoverPayload = { media: '', bg: '#101318', isVideo: false }
+let splashCoverPayload = { media: '', bg: '#101318', isVideo: false, mode: 'default', blur: 18 }
 
-/** GUI 加载期间保持启动画面媒体覆盖（无缝过渡到主界面）。
- *  覆盖层由 main-preload.js 在页面脚本执行前注入（documentElement 一出现
- *  就位），主界面输入框出现（或 20s 超时）后淡出移除——加载期间不会露出
- *  DSH 自己的加载画面。默认模式（无媒体）不覆盖。 */
+/** 壁纸式启动过渡：preload 在页面脚本执行前注入壁纸背景 CSS，
+ *  页面（AppRoot）在 跟随主题/自定义 模式下加载期不渲染 HARNESS 卡片，
+ *  壁纸从启动到主界面全程连续。默认模式（无媒体）不注入。 */
 function armSplashCover(win, wallpaper) {
   const hit = resolveSplashFile(wallpaper)
-  if (hit === null) {
-    splashCoverPayload = { media: '', bg: '#101318', isVideo: false }
-    return
-  }
-  if (hit.isVideo) {
-    // 视频走协议 URL（无法内嵌）；加载期用品牌深色（视频本身黑底，自然）
-    splashCoverPayload = { media: wallpaperVideoUrl(hit.file), bg: '#101318', isVideo: true }
-  } else {
-    // 图片用压缩 data URL（启动时预生成一次）：preload 注入后立即显示，
-    // 没有协议加载期；bg 主色兜底 img 解码的几十毫秒
-    splashCoverPayload = {
-      media: wallpaperDataUrl(hit.file, 2048),
-      bg: dominantColor(hit.file) ?? '#101318',
-      isVideo: false,
-    }
+  splashCoverPayload = {
+    media: hit === null ? '' : wallpaperVideoUrl(hit.file),
+    bg: hit !== null && !hit.isVideo ? (dominantColor(hit.file) ?? '#101318') : '#101318',
+    isVideo: hit !== null && hit.isVideo,
+    mode: splashMode(),
+    blur: wallpaperBlur(),
   }
 }
 
