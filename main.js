@@ -449,17 +449,28 @@ function handleWallpaperProtocol(request) {
   }
 }
 
+/** HEVC 视频优先使用已有转码版（原名-H264.mp4），否则原路径。 */
+function preferTranscoded(file) {
+  if (!isVideoWallpaper(file) || videoCodec(file) !== 'hevc') return file
+  const out = path.join(path.dirname(file), `${path.basename(file, path.extname(file))}-H264.mp4`)
+  if (fs.existsSync(out)) {
+    log(`using transcoded media: ${out}`)
+    return out
+  }
+  return file
+}
+
 /** 解析启动画面媒体文件（按当前模式）：返回 { file, isVideo }，无媒体返回 null。
- *  custom → splashFile；follow → 主壁纸。 */
+ *  custom → splashFile；follow → 主壁纸。HEVC 视频优先用转码版。 */
 function resolveSplashFile(wallpaper) {
   const mode = splashMode()
   const cfg = loadConfig()
   const custom = cfg.splashFile && fs.existsSync(cfg.splashFile) ? path.resolve(cfg.splashFile) : null
   if (mode === 'custom' && custom !== null) {
-    return { file: custom, isVideo: isVideoWallpaper(custom) }
+    return { file: preferTranscoded(custom), isVideo: isVideoWallpaper(custom) }
   }
   if (mode === 'follow' && wallpaper !== null) {
-    return { file: wallpaper, isVideo: isVideoWallpaper(wallpaper) }
+    return { file: preferTranscoded(wallpaper), isVideo: isVideoWallpaper(wallpaper) }
   }
   return null
 }
@@ -517,9 +528,19 @@ let splashCoverPayload = { media: '', bg: '#101318', isVideo: false, mode: 'defa
  *  壁纸从启动到主界面全程连续。默认模式（无媒体）不注入。 */
 function armSplashCover(win, wallpaper) {
   const hit = resolveSplashFile(wallpaper)
+  const file = hit === null ? null : hit.file
+  // HEVC 且无转码版：后台转码，完成后更新配置（下次启动生效）；本次先用原片
+  if (file !== null && isVideoWallpaper(file) && videoCodec(file) === 'hevc') {
+    ensureTranscoded(file, (final) => {
+      if (final !== file) {
+        saveConfig({ splashFile: final })
+        log(`splash auto-transcoded, saved: ${final}`)
+      }
+    })
+  }
   splashCoverPayload = {
-    media: hit === null ? '' : wallpaperVideoUrl(hit.file),
-    bg: hit !== null && !hit.isVideo ? (dominantColor(hit.file) ?? '#101318') : '#101318',
+    media: file === null ? '' : wallpaperVideoUrl(file),
+    bg: file !== null && hit.isVideo === false ? (dominantColor(file) ?? '#101318') : '#101318',
     isVideo: hit !== null && hit.isVideo,
     mode: splashMode(),
     blur: wallpaperBlur(),

@@ -11,7 +11,7 @@ $root = Split-Path $PSScriptRoot -Parent
 $ff = Join-Path $root '.toolchain\ffmpeg\ffmpeg.exe'
 if (-not (Test-Path $ff)) { throw "ffmpeg not found at $ff (run the ffmpeg download step first)" }
 if (-not (Test-Path $InputFile)) { throw "input not found: $InputFile" }
-if ($OutputFile -eq '') { $OutputFile = [IO.Path]::ChangeExtension($InputFile, '-H264.mp4') }
+if ($OutputFile -eq '') { $OutputFile = Join-Path (Split-Path $InputFile -Parent) ("{0}-H264.mp4" -f [IO.Path]::GetFileNameWithoutExtension($InputFile)) }
 Write-Host "transcoding: $InputFile -> $OutputFile (crf $Crf, visually lossless)"
 & $ff -y -i $InputFile -c:v libx264 -crf $Crf -preset medium -pix_fmt yuv420p -c:a aac -b:a 192k -movflags +faststart $OutputFile
 if ($LASTEXITCODE -ne 0) { throw "ffmpeg failed (exit $LASTEXITCODE)" }
