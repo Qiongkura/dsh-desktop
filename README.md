@@ -1,4 +1,4 @@
-# DeepSeek Harness Desktop（DSH 桌面端）
+# DeepSeek Harness Desktop（DSH 桌面端 · 界面设置版）
 
 <div align="center">
 
@@ -6,134 +6,276 @@
 
 </div>
 
-把 DeepSeek Harness 的 Web GUI 装进原生桌面窗口的 Electron 壳：
+把 DeepSeek Harness 的 Web GUI 装进原生桌面窗口，并**深度定制界面外观**的独立项目：
+壁纸 / 毛玻璃 / 液态玻璃 / 启动画面 / 自动转码，全部通过「界面设置」对话框一键配置。
 
-- **自包含发行版**：安装包内置完整的 DSH 后端运行时（`resources/runtime`，约
-  250MB 生产闭包），任何 Windows x64 用户下载安装后**双击即用**，无需安装
-  Node.js / pnpm / 拉取 DSH 仓库；
-- 自动探测 `http://127.0.0.1:3080`：GUI 已在运行就直接接管（不重复启动后端）；
-- 否则启动内置后端（内置 node.exe + `@deepseek-ai/dsh` 的 `lib/bin.js`），就绪后打开窗口；
-- 点 × 会弹出 DeepSeek Harness 风格的询问：**隐藏到系统托盘** 或 **直接退出**；隐藏后应用与
-  后端继续在后台运行，任务栏图标消失，单击/右键系统托盘图标即可恢复或退出；
-- 支持单实例（托盘隐藏时再次启动会恢复窗口）、系统浏览器打开外链、菜单栏快捷操作；
-- **自定义壁纸**：菜单「文件 → 设置壁纸…」选择图片，界面面板变为毛玻璃效果；
-  也支持 `--wallpaper=<图片路径>` / `DSH_WALLPAPER` / 配置项 `wallpaper`；
-- 内置模式把 DSH_HOME 隔离到应用数据目录（`%APPDATA%\DeepSeek Harness Desktop\home`），不干扰本机已有安装；
-- 可打包为绿色单文件 exe（portable）或解压即用的 ZIP 包。
+- **自包含发行版**：安装包内置完整 DSH 后端运行时（约 250MB 生产闭包），任何
+  Windows x64 用户下载安装后**双击即用**，无需安装 Node.js / pnpm / 拉取仓库；
+- **界面设置**：壁纸、视频壁纸、模糊、区域透明、输入框/轨迹毛玻璃、启动画面
+  （模式/素材/时长/淡出）、HEVC 自动转码……一个对话框全部搞定；
+- 自动探测 `http://127.0.0.1:3080`：GUI 已在运行就直接接管，否则启动内置后端；
+- 托盘常驻、关闭询问、单实例、自定义标题栏（返回/前进/菜单/窗口控制）。
 
-## 工作原理
+---
+
+## 功能总览
+
+| 功能 | 说明 |
+| --- | --- |
+| 壁纸图片/视频 | 菜单或设置对话框选择图片/视频作为界面背景（支持动态视频壁纸） |
+| 壁纸模糊 | 独立滑块（0-100px），壁纸层实时模糊 |
+| 代码块透明度 | 独立滑块（8%-100%），对话内代码块底色 |
+| 区域透明开关 | 新对话 / 输入框 / 左边栏 / 主界面 四个独立开关 |
+| 侧栏独立壁纸 | 左侧栏可单独设置一张壁纸（或与主图共用） |
+| 输入框液态玻璃 | 输入区毛玻璃（`backdrop-filter` + 面板色渐变），独立模糊滑块（最低 10px 保证文字必糊） |
+| 面板透明度 | 独立滑块（0-90%），面板半透明强度 |
+| 轨迹界面毛玻璃 | 与输入框共用同一套玻璃代码与滑块，按颜色饱和度智能透明（保留色条/状态标签） |
+| 启动画面 | 默认 / 跟随主题 / 自定义（图片或视频）三种模式 |
+| 动画时长 | 0-10 秒滑块；选视频时上限自动 = 视频完整时长（确保能完整播完） |
+| 淡出时长 | 0-2 秒滑块，启动画面结束时的渐隐时长 |
+| 点击跳过 | 启动动画期间点击任意位置直接跳过（主界面就绪后） |
+| HEVC 自动转码 | 检测到 HEVC（H.265）视频自动转码为 H.264（CRF 17 视觉无损），保证硬解流畅 |
+| 视频壁纸协议 | `dsh-wallpaper://` 特权协议，流式播放本地视频（支持 Range） |
+| 视频声音 | 可选播放壁纸视频的声音 |
+| 一体化标题栏 | 自绘标题栏：返回/前进/菜单/最小化/最大化/关闭 |
+
+---
+
+## 开发过程（迭代记录）
+
+整个界面设置能力是**在一个真实使用场景中逐步迭代**出来的，下面是完整开发过程。
+
+### 1. 桌面壳与自包含打包
+
+**背景**：DSH 是 Web GUI（`http://127.0.0.1:3080`），希望以原生桌面应用形式交付，
+且**打开即用**（用户不装 Node/pnpm、不拉仓库）。
+
+**方案**：
+- Electron 主进程加载 GUI；启动时**先探测 3080**——已有服务直接接管（attach），
+  否则用内置运行时把后端拉起来（`resources/runtime` + 内置 `node.exe`）；
+- 内置运行时由 `pnpm deploy` 生成生产闭包，再迭代修复闭包缺失的工作区包
+  （`repair-staging.mjs` 反复启动实测直到能跑）；
+- 托盘常驻 + 关闭询问（隐藏到托盘 / 直接退出）+ 单实例锁；
+- electron-builder 打包 portable exe / ZIP。
+
+**踩坑**：
+- 构建机进程 token 缺 `SeCreateSymbolicLinkPrivilege`，electron-builder 解压
+  winCodeSign 会因符号链接失败——用 7za 包装器吞掉该错误；
+- 镜像下载校验和——起本地镜像服务器原包直供；
+- 用户机器上曾出现多个残留实例占用单实例锁，导致"启动变老版本"——托盘 Exit
+  才是真正退出，关窗口只是隐藏。
+
+### 2. 壁纸系统（图片 / 视频）
+
+**背景**：默认纯色界面，希望换成自己的壁纸。
+
+**方案**：
+- 壁纸以 `body::before/::after` 伪元素实现（负 z-index、不拦截输入），
+  `--dsh-wallpaper-url` CSS 变量注入图片（data URL，避免 http 页面加载 file:// 的限制）；
+- 大图缩放到最长边 3840px 再编码（4K 屏清晰，且不拖死渲染器）；
+- **视频壁纸**：注册 `dsh-wallpaper://` 特权协议，流式返回本地视频
+  （支持 Range 请求，`<video>` 可 seek），`--bypasscsp/fetch/streaming` 特权全局生效；
+- 壁纸模糊：`filter: blur(var(--dsh-wallpaper-blur))`，独立滑块；
+- 代码块透明度、四个区域（新对话/输入框/侧栏/主界面）透明开关；
+- 侧栏可单独设置一张壁纸（共用主图 / 单独）。
+
+**踩坑**：
+- **CSS 变量作用域**：引用了主题变量（`var(--dsw-alias-*)`）的 CSS 变量**必须设在
+  `document.body`** 上（主题变量在 body），设在 `documentElement` 会解析失败，
+  表现为"透明开关没效果"；
+- **`Number(0) || 0.55` 假值陷阱**：面板透明度设为 0 时被 fallback 吞掉，
+  改用 `Number.isFinite` 判断；
+- **类名选择器**：`[class$='treeBody']` 匹配失败——实际类名是
+  `_6-zohW_treeBody _6-zohW_wide`（带额外类），`[class$=]` 必须改 `[class*=]`；
+- **用户截图"壁纸灰灰的"**：真实原因是面板 55% 白色叠加层——加了面板透明度滑块解决；
+- **"侧栏遮罩没效果 / 太高"**：mask 高度公式反复校准，最终改为复用主界面同款
+  高度代码（用户明确要求"直接套用和主界面一样的高度代码"）。
+
+### 3. 液态玻璃（输入框 / 轨迹）
+
+**背景**：输入框区域希望有"毛玻璃"质感：壁纸透出 + 模糊 + 面板色，文字滚入被盖住。
+
+**方案**：
+- `composerSeat::before` 伪元素做玻璃层：`backdrop-filter: blur(var(--dsh-glass-blur))`
+  + 从透明到面板色的渐变（顶部 20px 丝滑过渡）；
+- **专用模糊滑块**（输入框模糊）：独立于壁纸模糊（壁纸模糊 4px 时文字不糊，
+  玻璃专用模糊最低 10px 保证文字必糊）；
+- 图片壁纸与视频壁纸**统一走同一套玻璃**（不再区分实现）；
+- **轨迹界面**：与输入框共用同一变量与滑块；轨迹内部各层默认是不透明主题背景，
+  用**按颜色饱和度智能透明**的脚本处理——中性色（白/灰）背景透明让壁纸透出，
+  彩色元素（时间线色条、状态标签）按饱和度判断保留。
+
+**踩坑**：
+- 玻璃层 z-index 与伪元素定位、渐变过渡反复调参；
+- 轨迹视图是**运行时插件**（不在 web 构建产物里），CSS 类名是 tsdown 编译的
+  随机前缀（`rrWaNW_root` 之类），无法用稳定的类名选择器——最终放弃类名方案，
+  改用饱和度判断 + 轮询（每 1.5s 处理新渲染元素）；
+- `* { background: transparent }` 全透明会把时间线色条也弄没——必须按饱和度区分。
+
+### 4. 启动画面（模式 / 时长 / 淡出 / 点击跳过）
+
+**背景**：应用启动到主界面之间有空白/加载界面，希望有可控的启动动画/壁纸。
+
+**方案**（迭代了多个版本）：
+- **三种模式**：默认（HARNESS 原生加载界面）/ 跟随主题（当前壁纸）/ 自定义
+  （指定图片或视频，按扩展名自动识别）；
+- **单步流程**：不再显示独立的 splash 页面（避免"视频播两遍"），窗口出现即由
+  页面内的 preload 注入启动层（视频 `<video>` / 图片全屏层，z-index 最大），
+  主界面渲染完成后淡出移除；
+- **动画时长**：滑块 0-10 秒；选择视频素材后自动检测视频时长（ffmpeg 读
+  metadata），滑块上限变为视频完整时长，确保能完整播完；
+- **淡出时长**：0-2 秒滑块，结束渐隐；
+- **点击跳过**：启动层点击任意位置，主界面就绪后立即进入；
+- 后端启动慢时（自起场景）8 秒兜底显示等待页。
+
+**踩坑**：
+- 早期用 `executeJavaScript` 注入覆盖层——IPC 往返 + 主线程忙，注入总是慢半拍，
+  实测比页面加载晚 600-900ms，HARNESS 加载界面必然露出来；
+- **preload 注入才是正解**：preload 在页面脚本执行前运行，`documentElement` 一出现
+  （11ms 内）就能注入，彻底盖住加载界面；
+- Electron 版本事件名：`did-dom-ready` 在这个版本**从不触发**，必须用 `dom-ready`；
+- 覆盖层传大 data URL 太慢（几百 ms），改为 `dsh-wallpaper://` 协议 URL（几十字节）；
+- 视频素材当 CSS 背景**不能播放**——必须用 `<video>` 元素；
+- 启动层 z-index 必须是最大（`2147483647`），否则主界面壁纸会盖住它，
+  "动画时长"形同虚设；
+- 旧配置兼容：4 模式（图片/动画分开）合并为 3 模式时，`image/animation` 必须
+  归一化为 `custom`，否则旧设置变成默认（用户看到品牌页）。
+
+### 5. HEVC 自动转码
+
+**背景**：用户手机视频（HEVC/H.265）在 Electron 里没有可靠硬解，全屏播放卡顿。
+
+**方案**：
+- 检测视频编码（读文件头尾采样搜 `hvc1/hev1/avc1` 标记）；
+- 检测到 HEVC → 自动转码 H.264（ffmpeg，`libx264 -crf 17 -preset medium`，
+  **画质视觉无损**，30Mbps 级码率），转码完成后自动使用转码版并更新配置；
+- 应用内置 ffmpeg（`ffmpeg.exe.gz` 28MB，首次转码自动解压到用户数据目录）；
+- 启动时也自动优先使用已有转码版（`原名-H264.mp4`），没有则后台转码。
+
+**踩坑**：
+- 用户配置指向未转码的新视频时，转码只发生在"选择素材"时刻——启动时也要处理，
+  否则"还是卡"；
+- ffmpeg 二进制体积大，不能入库（gitignore），打包时作为 extraResources 带 gz。
+
+### 6. 设置对话框（交互细节）
+
+**背景**：所有界面设置在同一个无边框对话框里完成。
+
+**方案/修复**：
+- 对话框是主窗口的子窗口（父子关系保证在主窗口之上，但**不置顶**——置顶会挡住
+  其他软件，连点击别的软件都不行）；
+- 文件选择器挂在设置对话框上（模态于其上），不会被置顶的设置框盖住；
+- 标题栏可拖拽（`-webkit-app-region: drag` + 顶部全宽拖拽条）；
+- 关闭设置后显式把焦点还给主窗口（避免被其他软件抢焦点）；
+- 底部按钮留足边距（窗口加高 + footer padding）。
+
+---
+
+## 架构与实现
 
 ```
-┌───────────────────────────────┐
-│  DeepSeek Harness Desktop     │  (Electron)
-│  ┌───────────┐   ┌─────────┐  │
-│  │ 主进程     │──▶│ 探测 3080│── 有 → 接管（外部服务）
-│  │ main.js   │   └─────────┘  │
-│  │           │                │
-│  │           │   ┌─────────┐  │
-│  │           │──▶│ 内置后端  │── 内置 node.exe + lib/bin.js web
-│  │           │   │ runtime │    （resources/runtime，pnpm deploy 闭包）
-│  │           │   └─────────┘  └── 原生窗口加载 GUI
-│  └─────┬─────┘
-└────────┼──────────────────────────┘
-  外部模式：DSH_ROOT / --dsh-root 指定仓库（G:\deepseek-harness 或其它）
+┌──────────────────────────────────────────────────┐
+│  DeepSeek Harness Desktop (Electron)             │
+│  ┌────────────────────────────────────────────┐  │
+│  │ main.js 主进程                              │  │
+│  │ · 配置/日志/菜单/托盘/单实例                 │  │
+│  │ · 后端探测与拉起（attach 或内置 runtime）     │  │
+│  │ · dsh-wallpaper:// 特权协议（流式媒体）       │  │
+│  │ · 壁纸/玻璃/透明 CSS 注入（injectWallpaperCss）│  │
+│  │ · 启动画面媒体解析 + preload payload          │  │
+│  │ · HEVC 检测 + ffmpeg 自动转码                │  │
+│  │ · 设置对话框（wallpaper-dialog/）             │  │
+│  └────────────────────────────────────────────┘  │
+│  ┌────────────────────────────────────────────┐  │
+│  │ main-preload.js（注入页面脚本前）            │  │
+│  │ · 一体化标题栏 contextBridge                │  │
+│  │ · 启动层注入（视频层/图片层 + 时长/淡出/跳过） │  │
+│  │ · 启动画面模式暴露给页面（dshSplashMode）     │  │
+│  └────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────┘
+        │ attach / 拉起
+        ▼
+┌──────────────────────────────────────────────────┐
+│ DSH Web GUI (http://127.0.0.1:3080)             │
+│ · AppRoot 加载门控（壁纸模式不渲染 HARNESS 卡片）  │
+│ · 壁纸/玻璃/透明 全部由主进程注入的 CSS 控制       │
+└──────────────────────────────────────────────────┘
+```
 
+关键技术点：
+
+- **壁纸层**：`body::before/::after`（负 z-index、不拦截输入、不创建 JS 层）；
+- **液态玻璃**：`::before` + `backdrop-filter` + 面板色渐变，图片/视频统一；
+- **启动层**：preload 在页面脚本执行前注入（`documentElement` 一出现即就位），
+  z-index 最大，主界面就绪 + 满足时长后淡出移除；
+- **轨迹玻璃**：按颜色饱和度智能透明（JS 轮询），不依赖易变的插件类名；
+- **自动转码**：编码检测 + ffmpeg（CRF 17 视觉无损）+ 转码版优先；
+- **视频时长检测**：ffmpeg `-i` 解析 `Duration`，驱动动画时长滑块上限。
 
 ## 目录结构
 
 | 路径 | 说明 |
 | --- | --- |
-| `main.js` | Electron 主进程：配置解析、后端进程管理、窗口、托盘与关闭询问 |
-| `close-dialog/` | 关闭确认对话框（DSH 风格无边框窗口）：`index.html` + `preload.js`（按钮结果回传主进程） |
-| `scripts/render-icon.cjs` | 用 Electron 把 GUI 官方 favicon（`apps/web/public/favicon.svg`，无 fill 默认黑色）渲染成 512px 图标底图（浅色圆角方块 + 黑色官方标） |
-| `build/build-icons.ps1` | 由底图生成 `build/icon.png`（512）与 `build/icon.ico`（16~256 多尺寸） |
+| `main.js` | Electron 主进程：后端管理、壁纸/玻璃/透明注入、启动画面、转码、设置对话框 |
+| `main-preload.js` | 主窗口 preload：标题栏能力 + 启动层注入 + 模式暴露 |
+| `wallpaper-dialog/` | 界面设置对话框（无边框、可拖拽、置顶于主窗口） |
+| `titlebar/` | 一体化标题栏注入（CSS/JS/preload） |
+| `close-dialog/` | 关闭确认对话框（隐藏到托盘 / 直接退出） |
 | `scripts/build-dist.ps1` | 一键构建：渲染图标 → 部署内置运行时 → 修复闭包 → electron-builder |
-| `.toolchain/repair-staging.mjs` | 迭代补齐 pnpm deploy 漏掉的工作区包，直到内置运行时能启动 |
-| `build/node.exe` | 打包时内置的 Node 运行时（从本机 `node` 复制），后端优先用它启动 |
-| `.npmrc` | 使用 npmmirror 镜像（registry / electron / electron-builder-binaries） |
-
-> 注意：`scripts/*.ps1`、`build/*.ps1` 必须保持纯 ASCII（注释用英文）——非 ASCII
-> 字节在 GBK 解码下会损坏脚本（实测会吞掉换行、导致变量赋值失效）。
+| `scripts/transcode-video.ps1` | 手动转码脚本（HEVC → H.264 CRF 17） |
+| `scripts/update-release.ps1` | 上传构建产物到 GitHub Release |
+| `.toolchain/` | 构建工具链（7za 包装器、镜像服务器、闭包修复、ffmpeg） |
 
 ## 开发运行
 
 ```powershell
 npm install     # 安装 electron + electron-builder（走 npmmirror 镜像）
-npm start       # 直接以开发模式启动桌面端
+npm start       # 开发模式启动（attach 本机 3080 或按配置拉起后端）
 ```
 
 ## 打包 exe
-
-自包含发行版（推荐，产物约 300~400MB，内置完整后端）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build-dist.ps1
 ```
 
-构建机要求：Node.js + pnpm、DSH 仓库 checkout（`G:\deepseek-harness`，可用
-`DSH_SOURCE_ROOT` 覆盖）、网络（npmmirror）。流程：
-
-1. `pnpm deploy` 产出 `@deepseek-ai/dsh` 的生产闭包（无符号链接、仅运行时依赖）；
-2. `repair-staging.mjs` 迭代补齐 deploy 漏掉的工作区包并实测启动；
-3. electron-builder 将闭包与内置 node.exe 一起打进 `resources/runtime`。
-
-> 构建环境注意事项（本机实测）：
-> - 本机进程 token 没有 `SeCreateSymbolicLinkPrivilege`，electron-builder 解压
->   winCodeSign 时因两个 mac 符号链接失败。`build-dist.ps1` 会临时安装一个
->   7za 包装器（`.toolchain\7za-wrapper.cs` 编译而来）吞掉该错误，构建完自动还原。
-> - electron-builder 下载 electron-builder-binaries 时，`npm run` 会强制注入
->   `.npmrc` 的镜像地址，因此构建脚本直接调用 electron-builder，并起本地镜像
->   服务器（`.toolchain\mirror-server.js`，原包直供）保证校验和一致。
+构建机要求：Node.js + pnpm、DSH 仓库 checkout（可用 `DSH_SOURCE_ROOT` 覆盖）、
+网络（npmmirror）。产物：portable exe + ZIP，约 300-400MB（内置完整后端 + ffmpeg）。
 
 ## 配置
 
-优先级：环境变量 > 命令行参数 > 配置文件 > 默认值。
+配置文件：`%APPDATA%\DeepSeek Harness Desktop\config.json`；日志同目录 `logs/`。
 
-| 配置 | 环境变量 | 命令行参数 | 默认值 |
-| --- | --- | --- | --- |
-| DSH 仓库根目录 | `DSH_ROOT` | `--dsh-root=<路径>` | `G:\deepseek-harness` |
-| 后端端口 | `DSH_PORT` | `--port=<n>` | `3080` |
-| 不拉起后端 | — | `--no-server` | 接管已有服务 |
-| 禁用托盘与关闭询问 | — | `--no-tray` | 点 × 直接退出（旧行为） |
-| 自动化验证 | — | `--smoke-test` | 加载成功打印 `SMOKE_OK` 并退出 |
-
-配置文件位于 `%APPDATA%\DeepSeek Harness Desktop\config.json`（首次成功启动后自动写入），日志在 `%APPDATA%\DeepSeek Harness Desktop\logs\`。
-
-## 托盘与关闭行为
-
-- 点主窗口 ×（或 Alt+F4）弹出 DSH 风格的关闭确认框：`取消` / `直接退出` / `隐藏到托盘`（默认，
-  回车触发；Esc 取消）。选择隐藏后窗口仅隐藏不销毁，后端服务继续运行；
-- 首次隐藏会弹出系统托盘气泡提示；之后可从托盘图标单击恢复窗口、右键菜单执行
-  `显示主窗口` / `隐藏主窗口` / `在浏览器中打开` / `退出`；
-- 应用菜单「文件 → 隐藏到托盘」等效于关闭询问中的隐藏；「文件 → 退出」为真正退出，
-  会回收后端进程；
-- 托盘隐藏状态下再次启动应用（或点击快捷方式）会直接恢复主窗口（单实例）；
-- 关闭确认框为独立无边框窗口（`close-dialog/`，随安装包分发），暗色主题与 GUI 一致；
-- 传 `--no-tray` 可完全禁用该特性，恢复「点 × 即退出」的旧行为（冒烟测试自动禁用）。
-
-## 冒烟测试
-
-```powershell
-npm run smoke   # 启动 → 等待页面加载完成 → 打印 SMOKE_OK/SMOKE_FAIL 并退出
-```
-
-## 与官方项目的关系
-
-本项目基于 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 构建。
-
-DeepSeek Harness 的核心能力、插件系统和 Web UI 来自官方项目。本项目主要负责：
-
-- 桌面应用封装
-- 本地服务生命周期管理
-- 桌面窗口和系统托盘集成
-- Windows 安装包构建与发布
-- 桌面环境下的界面适配
-
-如果你希望通过命令行运行 Harness，或者参与核心功能开发，请优先查看官方仓库。
+| 配置项 | 说明 | 默认 |
+| --- | --- | --- |
+| `wallpaper` | 壁纸图片/视频路径 | 无 |
+| `sidebarWallpaper` | 侧栏独立壁纸 | 共用主图 |
+| `wallpaperBlur` | 壁纸模糊 px | 18 |
+| `wallpaperCodeAlpha` | 代码块透明度 | 0.45 |
+| `transparentNewSession/Input/Sidebar/Main` | 区域透明开关 | true |
+| `wallpaperVideoSound` | 视频壁纸声音 | false |
+| `glassBlur` | 输入框/轨迹玻璃模糊 px | 10 |
+| `panelAlpha` | 面板透明度 | 0.55 |
+| `splashMode` | 启动画面模式 default/follow/custom | default |
+| `splashFile` | 自定义启动素材 | 无 |
+| `splashDuration` | 动画时长（秒） | 0 |
+| `splashFade` | 淡出时长（秒） | 0.5 |
 
 ## 已知限制
 
-- 内置运行时不含 `pnpm`，GUI 里的插件安装/管理功能不可用（浏览、查看不受影响）；
-- 内置运行时基于构建当时的 DSH 仓库版本，需重新打包才能跟随上游更新；
-- `--host 0.0.0.0` 被 DSH 官方禁止（安全性设计），桌面端固定使用 `127.0.0.1`；
-- 端口被其他程序占用时会直接接管，请确认该端口上确实是 DSH GUI。
+- 内置运行时不含 `pnpm`，GUI 里的插件安装/管理功能不可用；
+- 内置运行时基于构建当时的 DSH 仓库版本，需重新打包跟随上游更新；
+- 端口被其他程序占用时会直接接管，请确认该端口上确实是 DSH GUI；
+- HEVC 转码首次耗时数分钟（CRF 17 高码率），转码期间使用原片（可能卡顿），
+  完成后自动切换转码版。
+
+## 与官方项目的关系
+
+本项目基于 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 构建，
+负责桌面封装与界面定制；DSH 核心能力、插件系统与 Web UI 来自官方项目。
+
+## 联系方式
+
+- GitHub：https://github.com/Qiongkura
+- 微信：Qiongkura
+
