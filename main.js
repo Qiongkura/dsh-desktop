@@ -342,19 +342,42 @@ function handleWallpaperProtocol(request) {
   }
 }
 
-/** 生成启动画面（加载 GUI 前显示壁纸），写入 userData 后 loadFile。
- *  视频壁纸无法塞进 data URL，启动画面退化为品牌色底（保持轻量）。 */
+/** 生成启动画面（加载 GUI 前显示），写入 userData 后 loadFile。
+ *  模式（配置 splashMode）：
+ *    default   纯品牌色底（无壁纸）
+ *    follow    跟随主界面壁纸（图片 data URL；视频走 dsh-wallpaper://）
+ *    image     自定义图片（splashFile）
+ *    animation 自定义动画（splashFile：视频/GIF，走 dsh-wallpaper://） */
 function showSplash(win, wallpaper) {
-  const isVideo = wallpaper !== null && isVideoWallpaper(wallpaper)
-  const dataUrl = wallpaper === null || isVideo ? null : wallpaperDataUrl(wallpaper)
+  const cfg = loadConfig()
+  const mode = cfg.splashMode || 'default'
+  let media = null
+  let isVideo = false
+  const custom = cfg.splashFile && fs.existsSync(cfg.splashFile) ? path.resolve(cfg.splashFile) : null
+  if (mode === 'image' && custom !== null) {
+    media = wallpaperDataUrl(custom)
+  } else if (mode === 'animation' && custom !== null) {
+    media = wallpaperVideoUrl(custom)
+    isVideo = true
+  } else if (mode === 'follow' && wallpaper !== null) {
+    if (isVideoWallpaper(wallpaper)) {
+      media = wallpaperVideoUrl(wallpaper)
+      isVideo = true
+    } else {
+      media = wallpaperDataUrl(wallpaper)
+    }
+  }
+  const mediaHtml = isVideo
+    ? `<video class="wall" autoplay loop muted playsinline src="${media}"></video>`
+    : `<div class="wall"${media === null ? '' : ` style="background:url('${media}') center/cover no-repeat"`}></div>`
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title></title><style>
     html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#101318}
-    .wall{position:fixed;inset:0;${dataUrl === null ? '' : `background:url('${dataUrl}') center/cover no-repeat`}}
+    .wall{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
     .shade{position:fixed;inset:0;background:linear-gradient(to top,rgba(8,10,16,.55),transparent 45%)}
     .brand{position:fixed;left:28px;bottom:22px;color:#fff;font:600 20px/1.3 "Segoe UI",system-ui,sans-serif;opacity:.92}
     .brand small{display:block;font:400 12px/1.4 "Segoe UI",system-ui,sans-serif;opacity:.65}
   </style></head><body>
-    <div class="wall"></div><div class="shade"></div>
+    ${mediaHtml}<div class="shade"></div>
     <div class="brand">DeepSeek Harness<small>正在启动本地服务…</small></div>
   </body></html>`
   const splash = path.join(app.getPath('userData'), 'splash.html')
@@ -386,6 +409,20 @@ function glassBlur() {
 function panelAlpha() {
   const n = Number(loadConfig().panelAlpha)
   return Number.isFinite(n) && n >= 0 && n <= 1 ? n : 0.55
+}
+
+/** 启动画面模式：default / follow / image / animation，默认 default。 */
+function splashMode() {
+  const mode = loadConfig().splashMode
+  return ['default', 'follow', 'image', 'animation'].includes(mode) ? mode : 'default'
+}
+
+/** 启动画面自定义素材（图片或动画视频），不存在返回 null。 */
+function configuredSplashFile() {
+  const cfg = loadConfig()
+  const candidate = cfg.splashFile
+  if (candidate && fs.existsSync(candidate)) return path.resolve(candidate)
+  return null
 }
 
 /** 已注入的面板 CSS key（用于清除壁纸时移除）；壁纸层是 JS 创建的 div，可即时换图。 */
@@ -843,7 +880,7 @@ function configuredWallpaper() {
  *  @param sidebarImage 侧栏独立壁纸路径或 null（null = 共用主壁纸）；
  *  @param flags 各区域透明开关 {newSession,input,sidebar,main}；
  *  @param dark 是否深色主题（false = 浅色） */
-function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, dark = true, videoSound = false, glass = 10, panelPct = 55) {
+function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, dark = true, videoSound = false, glass = 10, panelPct = 55, splashMode = 'default', splashName = '（无）') {
   const imageName = image === null ? '（无）' : `${path.basename(image)}${isVideoWallpaper(image) ? '（视频）' : ''}`
   const sidebarName = sidebarImage === null ? '（无）' : `${path.basename(sidebarImage)}${isVideoWallpaper(sidebarImage) ? '（视频）' : ''}`
   const alphaPct = Math.round(codeAlpha * 100)
@@ -984,6 +1021,21 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
         <label class="check"><input type="checkbox" id="vSound" ${videoSound ? 'checked' : ''}><span>播放壁纸视频的声音</span></label>
       </div>
       <div class="desc" style="margin-top:6px;padding-left:104px">仅当壁纸是视频时生效（图片壁纸无声音）。</div>
+      <div class="row" style="margin-top:14px">
+        <span class="label">启动画面</span>
+        <div class="seg">
+          <button class="segbtn ${splashMode === 'default' ? 'on' : ''}" id="spDefault">默认</button>
+          <button class="segbtn ${splashMode === 'follow' ? 'on' : ''}" id="spFollow">跟随主界面</button>
+          <button class="segbtn ${splashMode === 'image' ? 'on' : ''}" id="spImage">自定义图片</button>
+          <button class="segbtn ${splashMode === 'animation' ? 'on' : ''}" id="spAnim">自定义动画</button>
+        </div>
+      </div>
+      <div class="imgrow" id="splashRow" style="${splashMode === 'image' || splashMode === 'animation' ? '' : 'display:none'}">
+        <span class="label">启动素材</span>
+        <span class="imgname" id="splashname">${splashName}</span>
+        <button class="smallbtn" id="splashpick">选择…</button>
+        <button class="smallbtn" id="splashclear">清除</button>
+      </div>
     </div>
     <div class="footer">
       <button class="btn btn-ghost" id="reset">恢复默认</button>
@@ -1057,11 +1109,39 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
       blurEl.value = 18; alphaEl.value = 45; glassEl.value = 10; panelEl.value = 55
       vSoundEl.checked = false; preview()
     })
+    // 启动画面模式：默认/跟随主界面/自定义图片/自定义动画
+    const splashButtons = {
+      default: document.getElementById('spDefault'),
+      follow: document.getElementById('spFollow'),
+      image: document.getElementById('spImage'),
+      animation: document.getElementById('spAnim'),
+    }
+    const splashRow = document.getElementById('splashRow')
+    const splashNameEl = document.getElementById('splashname')
+    let splashModeDraft = '${splashMode}'
+    const setSplashMode = (mode) => {
+      splashModeDraft = mode
+      for (const [key, btn] of Object.entries(splashButtons)) {
+        btn.classList.toggle('on', key === mode)
+      }
+      splashRow.style.display = (mode === 'image' || mode === 'animation') ? '' : 'none'
+    }
+    for (const [key, btn] of Object.entries(splashButtons)) {
+      btn.addEventListener('click', () => setSplashMode(key))
+    }
+    document.getElementById('splashpick').addEventListener('click', () => api.pickSplashImage(splashModeDraft))
+    document.getElementById('splashclear').addEventListener('click', () => {
+      splashNameEl.textContent = '（无）'
+      api.clearSplashImage()
+    })
+    api.onSplashImageChosen((file) => {
+      splashNameEl.textContent = file === null ? '（无）' : file.split(/[\\\\/]/).pop()
+    })
     document.getElementById('cancel').addEventListener('click', () => api.commit({ ok: false }))
-    document.getElementById('ok').addEventListener('click', () => api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags(), videoSound: vSoundEl.checked, glassBlur: Number(glassEl.value), panelAlpha: Number(panelEl.value) / 100 }))
+    document.getElementById('ok').addEventListener('click', () => api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags(), videoSound: vSoundEl.checked, glassBlur: Number(glassEl.value), panelAlpha: Number(panelEl.value) / 100, splashMode: splashModeDraft }))
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') api.commit({ ok: false })
-      else if (event.key === 'Enter') api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags(), videoSound: vSoundEl.checked, glassBlur: Number(glassEl.value), panelAlpha: Number(panelEl.value) / 100 })
+      else if (event.key === 'Enter') api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags(), videoSound: vSoundEl.checked, glassBlur: Number(glassEl.value), panelAlpha: Number(panelEl.value) / 100, splashMode: splashModeDraft })
     })
     preview()
   </script>
@@ -1081,6 +1161,9 @@ let transparentOriginal = null // 对话框打开时的透明开关
 let videoSoundOriginal = false // 对话框打开时的视频声音开关
 let glassOriginal = 10 // 对话框打开时的输入框模糊
 let panelOriginal = 0.55 // 对话框打开时的面板透明度
+let splashModeOriginal = 'default' // 对话框打开时的启动画面模式
+let splashFileOriginal = null // 对话框打开时的启动素材
+let splashFileDraft = null // 对话框内启动素材草稿
 
 /** 恢复对话框打开前的壁纸状态（取消时）。 */
 function restoreWallpaperState() {
@@ -1148,9 +1231,12 @@ async function showWallpaperDialog() {
   videoSoundOriginal = wallpaperVideoSound()
   glassOriginal = glassBlur()
   panelOriginal = panelAlpha()
+  splashModeOriginal = splashMode()
+  splashFileOriginal = configuredSplashFile()
+  splashFileDraft = splashFileOriginal
   const dlg = new BrowserWindow({
     width: 420,
-    height: 560,
+    height: 640,
     show: false,
     frame: false,
     // 置顶：不被主窗口的对话轨迹/输入框遮住
@@ -1176,7 +1262,7 @@ async function showWallpaperDialog() {
   dlg.on('closed', () => {
     blurDialog = null
   })
-  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal, transparentOriginal, dialogDark, videoSoundOriginal, glassOriginal, Math.round(panelOriginal * 100)))}`)
+  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal, transparentOriginal, dialogDark, videoSoundOriginal, glassOriginal, Math.round(panelOriginal * 100), splashModeOriginal, splashFileOriginal === null ? '（无）' : path.basename(splashFileOriginal)))}`)
 }
 
 // 滑块/开关实时预览（模糊 + 代码块透明度 + 区域透明开关 + 视频声音 + 玻璃模糊 + 面板透明度）
@@ -1334,6 +1420,35 @@ ipcMain.on('dsh:wallpaper-sidebar-mode', async (_event, mode) => {
   }
 })
 
+// 对话框内选择启动素材（按模式区分图片/动画滤镜）：即时保存草稿
+ipcMain.on('dsh:wallpaper-pick-splash', async (_event, mode) => {
+  const win = mainWindow
+  const dlg = blurDialog
+  if (win === null || win.isDestroyed() || dlg === null || dlg.isDestroyed()) return
+  const isAnim = mode === 'animation'
+  const result = await dialog.showOpenDialog(win, {
+    title: isAnim ? '选择启动动画' : '选择启动图片',
+    properties: ['openFile'],
+    filters: isAnim
+      ? [
+        { name: '动画 / 视频', extensions: ['mp4', 'm4v', 'webm', 'mov', 'ogv', 'gif'] },
+        { name: '所有文件', extensions: ['*'] },
+      ]
+      : [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }],
+  })
+  if (result.canceled || result.filePaths.length === 0) return
+  splashFileDraft = result.filePaths[0]
+  dlg.webContents.send('dsh:wallpaper-splash-image-chosen', splashFileDraft)
+})
+
+// 对话框内清除启动素材
+ipcMain.on('dsh:wallpaper-clear-splash', () => {
+  const dlg = blurDialog
+  if (dlg === null || dlg.isDestroyed()) return
+  splashFileDraft = null
+  dlg.webContents.send('dsh:wallpaper-splash-image-chosen', null)
+})
+
 // 确定/取消：ok=true 保存全部设置（滑块当前值 + 图片草稿）；否则还原
 ipcMain.on('dsh:wallpaper-commit', (_event, payload) => {
   if (payload?.ok) {
@@ -1358,6 +1473,12 @@ ipcMain.on('dsh:wallpaper-commit', (_event, payload) => {
       const pn = Number(payload.panelAlpha)
       cfg.panelAlpha = Number.isFinite(pn) ? Math.max(0, Math.min(1, pn)) : 0.55
     }
+    if (payload.splashMode !== undefined) {
+      cfg.splashMode = ['default', 'follow', 'image', 'animation'].includes(payload.splashMode)
+        ? payload.splashMode : 'default'
+    }
+    if (splashFileDraft === null) cfg.splashFile = undefined
+    else cfg.splashFile = splashFileDraft
     saveConfig(cfg)
     const T = payload.transparent
     log(`wallpaper settings saved: blur=${cfg.wallpaperBlur ?? '?'}px codeAlpha=${cfg.wallpaperCodeAlpha ?? '?'} glass=${cfg.glassBlur ?? '?'}px panelAlpha=${cfg.panelAlpha ?? '?'} image=${imageDraft ?? '(none)'} sidebar=${sidebarDraft ?? '(shared)'} transparent=${T ? `${T.newSession}/${T.input}/${T.sidebar}/${T.main}` : '?'} videoSound=${cfg.wallpaperVideoSound ?? false}`)
@@ -1482,7 +1603,8 @@ function createWindow(url, wallpaper) {
     }
   })
 
-  win.loadURL(url)
+  // 启动画面先行（file:// 页），后端就绪后由启动流程调用 loadURL 切换 GUI
+  showSplash(win, wallpaper)
   mainWindow = win
   return win
 }
@@ -1935,6 +2057,15 @@ if (!gotLock) {
     const url = `http://${DEFAULT_HOST}:${port}`
     log(`target url = ${url}`)
 
+    // 只记住外部仓库路径，不记端口；内置模式与冒烟测试不落盘
+    if (!runtime.bundled && !process.argv.includes('--smoke-test')) saveConfig({ dshRoot: runtime.root })
+    const wallpaper = resolveWallpaper()
+    log(`wallpaper = ${wallpaper === null ? '(none)' : wallpaper}`)
+    buildMenu(runtime, url)
+    // 提前建窗显示启动画面（自定义启动动画/壁纸在此展示），
+    // 后端就绪后由下方 loadURL 切换到 GUI
+    const win = createWindow(url, wallpaper)
+
     const noServer = process.argv.includes('--no-server')
     if (!noServer) {
       const alive = await probe(url)
@@ -1963,13 +2094,8 @@ if (!gotLock) {
       }
     }
 
-    // 只记住外部仓库路径，不记端口；内置模式与冒烟测试不落盘
-    if (!runtime.bundled && !process.argv.includes('--smoke-test')) saveConfig({ dshRoot: runtime.root })
-    const wallpaper = resolveWallpaper()
-    log(`wallpaper = ${wallpaper === null ? '(none)' : wallpaper}`)
-    buildMenu(runtime, url)
-    createWindow(url, wallpaper)
     if (trayEnabled) createTray()
+    win.loadURL(url)
   })
 
   app.on('window-all-closed', () => {

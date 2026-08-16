@@ -9,6 +9,8 @@
  *  - pickSidebarImage() / clearSidebarImage()：更换/清除侧栏独立壁纸
  *  - setSidebarMode('shared'|'separate')：侧栏共用主图 / 单独设置
  *  - onSidebarImageChosen(cb)：主进程把侧栏选图结果回传给对话框
+ *  - pickSplashImage() / clearSplashImage()：更换/清除启动画面素材（图片或视频）
+ *  - onSplashImageChosen(cb)：主进程把启动素材选图结果回传给对话框
  */
 
 const { contextBridge, ipcRenderer } = require('electron')
@@ -26,5 +28,10 @@ contextBridge.exposeInMainWorld('dshWallpaperDialog', {
   },
   onSidebarImageChosen: (callback) => {
     ipcRenderer.on('dsh:wallpaper-sidebar-image-chosen', (_event, file) => callback(file))
+  },
+  pickSplashImage: () => ipcRenderer.send('dsh:wallpaper-pick-splash'),
+  clearSplashImage: () => ipcRenderer.send('dsh:wallpaper-clear-splash'),
+  onSplashImageChosen: (callback) => {
+    ipcRenderer.on('dsh:wallpaper-splash-image-chosen', (_event, file) => callback(file))
   },
 })
