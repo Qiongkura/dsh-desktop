@@ -1,4 +1,4 @@
-# dependencies
+﻿# dependencies
 node_modules/
 
 # build outputs
@@ -22,4 +22,5 @@ build/icon-base-512.png
 diag-*
 installed-main.js
 
-# ffmpeg (downloaded on demand for video transcoding).toolchain/ffmpeg/
+# ffmpeg (downloaded on demand / bundled as gz for video transcoding)
+.toolchain/ffmpeg/
