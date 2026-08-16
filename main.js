@@ -350,7 +350,8 @@ function handleWallpaperProtocol(request) {
     if (mime === undefined || !fs.existsSync(file)) return new Response('not found', { status: 404 })
     const stat = fs.statSync(file)
     const range = request.headers.get('range')
-    const headers = { 'content-type': mime, 'accept-ranges': 'bytes', 'cache-control': 'no-store' }
+    // 缓存：本地媒体允许 Chromium 磁盘缓存（启动视频/壁纸二次启动不重读磁盘）
+    const headers = { 'content-type': mime, 'accept-ranges': 'bytes', 'cache-control': 'public, max-age=86400' }
     if (range !== null) {
       const match = /bytes=(\d*)-(\d*)/.exec(range)
       if (match !== null) {
