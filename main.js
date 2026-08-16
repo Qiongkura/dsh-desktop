@@ -376,6 +376,18 @@ function wallpaperCodeAlpha() {
   return Number.isFinite(n) ? Math.max(0.08, Math.min(1, n)) : 0.45
 }
 
+/** 输入框液态玻璃模糊（px），独立于壁纸模糊，默认 10。 */
+function glassBlur() {
+  const n = Number(loadConfig().glassBlur)
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : 10
+}
+
+/** 面板半透明强度（0-1），默认 0.55。 */
+function panelAlpha() {
+  const n = Number(loadConfig().panelAlpha)
+  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : 0.55
+}
+
 /** 已注入的面板 CSS key（用于清除壁纸时移除）；壁纸层是 JS 创建的 div，可即时换图。 */
 let wallpaperCssKey = null
 
@@ -660,8 +672,10 @@ function applyWallpaper(win, wallpaper) {
     const dark = scheme === 'dark'
     window.__dshWallpaperTransparent = ${JSON.stringify(transparentFlags())}
     document.body.style.setProperty('--dsh-wallpaper-blur', '${wallpaperBlur()}px')
-    // 液态玻璃专用模糊：最低 10px，保证文字必糊
-    document.body.style.setProperty('--dsh-glass-blur', Math.max(10, ${wallpaperBlur()}) + 'px')
+    // 输入框液态玻璃专用模糊（独立滑杆控制，默认 10px）
+    document.body.style.setProperty('--dsh-glass-blur', '${glassBlur()}px')
+    // 面板半透明强度（独立滑杆控制，默认 0.55）
+    document.body.style.setProperty('--dsh-wallpaper-panel-alpha', '${panelAlpha()}')
     document.body.style.setProperty('--dsh-wallpaper-code-alpha', '${wallpaperCodeAlpha()}')
     const applyVars = () => {
       const isDark = document.body.hasAttribute('data-ds-dark-theme')
@@ -669,7 +683,9 @@ function applyWallpaper(win, wallpaper) {
       const T = window.__dshWallpaperTransparent || { newSession: true, input: true, sidebar: true, main: true }
       const a = parseFloat(document.body.style.getPropertyValue('--dsh-wallpaper-code-alpha'))
       const alpha = Number.isFinite(a) ? Math.max(0.08, Math.min(1, a)) : 0.45
-      const panelColor = isDark ? 'rgba(12,15,22,0.58)' : 'rgba(255,255,255,0.55)'
+      const paRaw = parseFloat(document.body.style.getPropertyValue('--dsh-wallpaper-panel-alpha'))
+      const pa = Number.isFinite(paRaw) ? Math.max(0, Math.min(1, paRaw)) : 0.55
+      const panelColor = isDark ? 'rgba(12,15,22,' + pa + ')' : 'rgba(255,255,255,' + pa + ')'
       // 以下变量必须设在 body 上：值里引用 var(--dsw-alias-bg-base) 等主题变量，
       // 主题变量定义在 body，设在 html 上会解析失败导致开关失效（回退半透明）
       // 主界面面板：透明=半透明面板色；不透明=主题基底色
@@ -729,6 +745,7 @@ function applyWallpaper(win, wallpaper) {
       document.documentElement.style.removeProperty('--dsh-wallpaper-panel-hover')
       document.body.style.removeProperty('--dsh-wallpaper-blur')
       document.body.style.removeProperty('--dsh-glass-blur')
+      document.body.style.removeProperty('--dsh-wallpaper-panel-alpha')
       document.body.style.removeProperty('--dsh-wallpaper-code-alpha')
       document.body.style.removeProperty('--dsh-t-new-session')
       document.body.style.removeProperty('--dsh-t-composer-mask-url')
@@ -826,7 +843,7 @@ function configuredWallpaper() {
  *  @param sidebarImage 侧栏独立壁纸路径或 null（null = 共用主壁纸）；
  *  @param flags 各区域透明开关 {newSession,input,sidebar,main}；
  *  @param dark 是否深色主题（false = 浅色） */
-function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, dark = true, videoSound = false) {
+function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, dark = true, videoSound = false, glass = 10, panelPct = 55) {
   const imageName = image === null ? '（无）' : `${path.basename(image)}${isVideoWallpaper(image) ? '（视频）' : ''}`
   const sidebarName = sidebarImage === null ? '（无）' : `${path.basename(sidebarImage)}${isVideoWallpaper(sidebarImage) ? '（视频）' : ''}`
   const alphaPct = Math.round(codeAlpha * 100)
@@ -936,6 +953,18 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
       </div>
       <div class="desc" style="margin-top:6px;padding-left:104px">侧栏与主界面壁纸无缝衔接为一张图。</div>
       <div class="row">
+        <span class="label">输入框模糊</span>
+        <input type="range" id="glass" min="0" max="64" step="1" value="${glass}">
+        <span class="val" id="glassval">${glass}px</span>
+      </div>
+      <div class="desc" style="margin-top:6px;padding-left:104px">输入框液态玻璃的模糊强度（独立于壁纸模糊）。</div>
+      <div class="row">
+        <span class="label">面板透明度</span>
+        <input type="range" id="panel" min="0" max="90" step="1" value="${panelPct}">
+        <span class="val" id="panelval">${panelPct}%</span>
+      </div>
+      <div class="desc" style="margin-top:6px;padding-left:104px">面板半透明强度：越低壁纸越鲜艳，越高越接近纯色。</div>
+      <div class="row">
         <span class="label">代码块透明度</span>
         <input type="range" id="alpha" min="8" max="100" step="1" value="${alphaPct}">
         <span class="val" id="alphaval">${alphaPct}%</span>
@@ -989,18 +1018,28 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
       main: document.getElementById('tMain').checked,
     })
     const vSoundEl = document.getElementById('vSound')
+    const glassEl = document.getElementById('glass')
+    const glassVal = document.getElementById('glassval')
+    const panelEl = document.getElementById('panel')
+    const panelVal = document.getElementById('panelval')
     const preview = () => {
       blurVal.textContent = blurEl.value + 'px'
       alphaVal.textContent = alphaEl.value + '%'
+      glassVal.textContent = glassEl.value + 'px'
+      panelVal.textContent = panelEl.value + '%'
       api.preview({
         blur: Number(blurEl.value),
         codeAlpha: Number(alphaEl.value) / 100,
         transparent: tFlags(),
         videoSound: vSoundEl.checked,
+        glassBlur: Number(glassEl.value),
+        panelAlpha: Number(panelEl.value) / 100,
       })
     }
     blurEl.addEventListener('input', preview)
     alphaEl.addEventListener('input', preview)
+    glassEl.addEventListener('input', preview)
+    panelEl.addEventListener('input', preview)
     vSoundEl.addEventListener('change', preview)
     document.querySelectorAll('.checks input').forEach((el) => el.addEventListener('change', preview))
     document.getElementById('pick').addEventListener('click', () => api.pickImage())
@@ -1015,13 +1054,14 @@ function buildWallpaperDialogHtml(blur, codeAlpha, image, sidebarImage, flags, d
       if (file !== null) setMode(true)
     })
     document.getElementById('reset').addEventListener('click', () => {
-      blurEl.value = 18; alphaEl.value = 45; vSoundEl.checked = false; preview()
+      blurEl.value = 18; alphaEl.value = 45; glassEl.value = 10; panelEl.value = 55
+      vSoundEl.checked = false; preview()
     })
     document.getElementById('cancel').addEventListener('click', () => api.commit({ ok: false }))
-    document.getElementById('ok').addEventListener('click', () => api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags(), videoSound: vSoundEl.checked }))
+    document.getElementById('ok').addEventListener('click', () => api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags(), videoSound: vSoundEl.checked, glassBlur: Number(glassEl.value), panelAlpha: Number(panelEl.value) / 100 }))
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') api.commit({ ok: false })
-      else if (event.key === 'Enter') api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags(), videoSound: vSoundEl.checked })
+      else if (event.key === 'Enter') api.commit({ ok: true, blur: Number(blurEl.value), codeAlpha: Number(alphaEl.value) / 100, transparent: tFlags(), videoSound: vSoundEl.checked, glassBlur: Number(glassEl.value), panelAlpha: Number(panelEl.value) / 100 })
     })
     preview()
   </script>
@@ -1039,6 +1079,8 @@ let sidebarOriginal = null // 对话框打开时的侧栏壁纸（null = 共用�
 let sidebarDraft = null // 对话框内侧栏壁纸草稿（null = 共用主图）
 let transparentOriginal = null // 对话框打开时的透明开关
 let videoSoundOriginal = false // 对话框打开时的视频声音开关
+let glassOriginal = 10 // 对话框打开时的输入框模糊
+let panelOriginal = 0.55 // 对话框打开时的面板透明度
 
 /** 恢复对话框打开前的壁纸状态（取消时）。 */
 function restoreWallpaperState() {
@@ -1046,6 +1088,8 @@ function restoreWallpaperState() {
   if (win === null || win.isDestroyed()) return
   setWallpaperBlurVar(blurOriginal)
   setCodeAlphaVar(codeOriginal)
+  setGlassBlurVar(glassOriginal)
+  setPanelAlphaVar(panelOriginal)
   setWallpaperVideoSoundLive(win, videoSoundOriginal).catch(() => {})
   if (sidebarOriginal === null) {
     clearSidebarWallpaperLayer(win).catch((error) => log('sidebar restore failed:', String(error)))
@@ -1102,9 +1146,11 @@ async function showWallpaperDialog() {
   sidebarDraft = sidebarOriginal
   transparentOriginal = transparentFlags()
   videoSoundOriginal = wallpaperVideoSound()
+  glassOriginal = glassBlur()
+  panelOriginal = panelAlpha()
   const dlg = new BrowserWindow({
     width: 420,
-    height: 470,
+    height: 560,
     show: false,
     frame: false,
     // 置顶：不被主窗口的对话轨迹/输入框遮住
@@ -1130,19 +1176,42 @@ async function showWallpaperDialog() {
   dlg.on('closed', () => {
     blurDialog = null
   })
-  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal, transparentOriginal, dialogDark, videoSoundOriginal))}`)
+  dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal, transparentOriginal, dialogDark, videoSoundOriginal, glassOriginal, Math.round(panelOriginal * 100)))}`)
 }
 
-// 滑块/开关实时预览（模糊 + 代码块透明度 + 区域透明开关 + 视频声音）
+// 滑块/开关实时预览（模糊 + 代码块透明度 + 区域透明开关 + 视频声音 + 玻璃模糊 + 面板透明度）
 ipcMain.on('dsh:wallpaper-preview', (_event, payload) => {
   if (payload?.blur !== undefined) setWallpaperBlurVar(payload.blur)
   if (payload?.codeAlpha !== undefined) setCodeAlphaVar(payload.codeAlpha)
   if (payload?.transparent !== undefined) setTransparentFlags(payload.transparent)
+  if (payload?.glassBlur !== undefined) setGlassBlurVar(payload.glassBlur)
+  if (payload?.panelAlpha !== undefined) setPanelAlphaVar(payload.panelAlpha)
   if (payload?.videoSound !== undefined) {
     setWallpaperVideoSoundLive(mainWindow, payload.videoSound === true)
       .catch((error) => log('video sound preview failed:', String(error)))
   }
 })
+
+/** 输入框液态玻璃模糊（实时预览用）。 */
+function setGlassBlurVar(value) {
+  const win = mainWindow
+  if (win === null || win.isDestroyed()) return
+  const v = Math.max(0, Math.min(100, Number(value) || 0))
+  win.webContents.executeJavaScript(
+    `document.body.style.setProperty('--dsh-glass-blur', '${v}px')`,
+  ).catch(() => {})
+}
+
+/** 面板半透明强度（实时预览用，重应用面板色）。 */
+function setPanelAlphaVar(value) {
+  const win = mainWindow
+  if (win === null || win.isDestroyed()) return
+  const v = Math.max(0, Math.min(1, Number(value) || 0.55))
+  win.webContents.executeJavaScript(
+    `document.body.style.setProperty('--dsh-wallpaper-panel-alpha', '${v}');
+     if (typeof window.__dshApplyWallpaperVars === 'function') window.__dshApplyWallpaperVars()`,
+  ).catch(() => {})
+}
 
 /** 把区域透明开关写入页面并即时重应用（对话框预览用）。 */
 function setTransparentFlags(flags) {
@@ -1283,9 +1352,13 @@ ipcMain.on('dsh:wallpaper-commit', (_event, payload) => {
       cfg.transparentMain = payload.transparent.main !== false
     }
     if (payload.videoSound !== undefined) cfg.wallpaperVideoSound = payload.videoSound === true
+    if (payload.glassBlur !== undefined) cfg.glassBlur = Math.max(0, Math.min(100, Number(payload.glassBlur) || 0))
+    if (payload.panelAlpha !== undefined) {
+      cfg.panelAlpha = Math.max(0, Math.min(1, Number(payload.panelAlpha) || 0.55))
+    }
     saveConfig(cfg)
     const T = payload.transparent
-    log(`wallpaper settings saved: blur=${cfg.wallpaperBlur ?? '?'}px codeAlpha=${cfg.wallpaperCodeAlpha ?? '?'} image=${imageDraft ?? '(none)'} sidebar=${sidebarDraft ?? '(shared)'} transparent=${T ? `${T.newSession}/${T.input}/${T.sidebar}/${T.main}` : '?'} videoSound=${cfg.wallpaperVideoSound ?? false}`)
+    log(`wallpaper settings saved: blur=${cfg.wallpaperBlur ?? '?'}px codeAlpha=${cfg.wallpaperCodeAlpha ?? '?'} glass=${cfg.glassBlur ?? '?'}px panelAlpha=${cfg.panelAlpha ?? '?'} image=${imageDraft ?? '(none)'} sidebar=${sidebarDraft ?? '(shared)'} transparent=${T ? `${T.newSession}/${T.input}/${T.sidebar}/${T.main}` : '?'} videoSound=${cfg.wallpaperVideoSound ?? false}`)
   } else {
     restoreWallpaperState()
   }
