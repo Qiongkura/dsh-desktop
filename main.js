@@ -342,39 +342,36 @@ function handleWallpaperProtocol(request) {
   }
 }
 
+/** 解析启动画面媒体（按当前模式）：返回 { media, isVideo }。
+ *  custom → splashFile；follow → 主壁纸；default → { media: null, isVideo: false }。 */
+function resolveSplashMedia(wallpaper) {
+  const mode = splashMode()
+  const cfg = loadConfig()
+  const custom = cfg.splashFile && fs.existsSync(cfg.splashFile) ? path.resolve(cfg.splashFile) : null
+  if (mode === 'custom' && custom !== null) {
+    return isVideoWallpaper(custom)
+      ? { media: wallpaperVideoUrl(custom), isVideo: true }
+      : { media: wallpaperDataUrl(custom), isVideo: false }
+  }
+  if (mode === 'follow' && wallpaper !== null) {
+    return isVideoWallpaper(wallpaper)
+      ? { media: wallpaperVideoUrl(wallpaper), isVideo: true }
+      : { media: wallpaperDataUrl(wallpaper), isVideo: false }
+  }
+  return { media: null, isVideo: false }
+}
+
 /** 生成启动画面（加载 GUI 前显示），写入 userData 后 loadFile。
  *  模式（配置 splashMode）：
  *    default   纯品牌色底（无壁纸）
  *    follow    跟随主界面壁纸（图片 data URL；视频走 dsh-wallpaper://）
  *    custom    自定义素材（splashFile：图片或视频，按扩展名自动识别） */
 function showSplash(win, wallpaper) {
-  const mode = splashMode()
-  const cfg = loadConfig()
-  let media = null
-  let isVideo = false
-  const custom = cfg.splashFile && fs.existsSync(cfg.splashFile) ? path.resolve(cfg.splashFile) : null
-  if (mode === 'custom' && custom !== null) {
-    if (isVideoWallpaper(custom)) {
-      media = wallpaperVideoUrl(custom)
-      isVideo = true
-    } else {
-      media = wallpaperDataUrl(custom)
-    }
-  } else if (mode === 'follow' && wallpaper !== null) {
-    if (isVideoWallpaper(wallpaper)) {
-      media = wallpaperVideoUrl(wallpaper)
-      isVideo = true
-    } else {
-      media = wallpaperDataUrl(wallpaper)
-    }
-  }
+  const { media, isVideo } = resolveSplashMedia(wallpaper)
   const mediaHtml = isVideo
     ? `<video class="wall" autoplay loop muted playsinline src="${media}"></video>`
     : `<div class="wall"${media === null ? '' : ` style="background:url('${media}') center/cover no-repeat"`}></div>`
-  // 只有默认模式显示品牌文字+底部渐变；跟随主题/自定义只显示壁纸/素材
-  const brandHtml = mode === 'default'
-    ? '<div class="shade"></div><div class="brand">DeepSeek Harness<small>正在启动本地服务…</small></div>'
-    : ''
+  const brandHtml = '<div class="shade"></div><div class="brand">DeepSeek Harness<small>正在启动本地服务…</small></div>'
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title></title><style>
     html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#101318}
     .wall{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
@@ -389,6 +386,42 @@ function showSplash(win, wallpaper) {
     fs.writeFileSync(splash, html)
     win.loadFile(splash)
   } catch { /* 壁纸失败不阻塞启动 */ }
+}
+
+/** GUI 加载期间保持启动画面媒体覆盖（无缝过渡到主界面）。
+ *  在 loadURL 前调用；GUI 文档就绪（did-dom-ready）时注入全屏覆盖层，
+ *  主界面输入框出现（或 20s 超时）后淡出移除——加载期间不会露出
+ *  DSH 自己的加载画面。默认模式（无媒体）不覆盖。 */
+function armSplashCover(win, wallpaper) {
+  let active = false
+  win.webContents.on('did-dom-ready', () => {
+    if (active || win.isDestroyed()) return
+    const { media, isVideo } = resolveSplashMedia(wallpaper)
+    if (media === null) return
+    active = true
+    const cover = isVideo
+      ? `<video autoplay loop muted playsinline src="${media}" style="width:100%;height:100%;object-fit:cover"></video>`
+      : `<div style="position:absolute;inset:0;background:#101318 url('${media}') center/cover no-repeat"></div>`
+    const js = `(function(){
+      var d = document.createElement('div');
+      d.id = 'dsh-splash-cover';
+      d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#101318;overflow:hidden';
+      d.innerHTML = ${JSON.stringify(cover)};
+      (document.documentElement || document.body).appendChild(d);
+      var tries = 0;
+      var iv = setInterval(function(){
+        tries++;
+        var ready = document.querySelector('[class*="composerSeat"]') || document.querySelector('textarea');
+        if (ready || tries > 400) {
+          clearInterval(iv);
+          d.style.transition = 'opacity .35s ease';
+          d.style.opacity = '0';
+          setTimeout(function(){ if (d.parentNode) d.parentNode.removeChild(d); }, 400);
+        }
+      }, 50);
+    })()`
+    win.webContents.executeJavaScript(js).catch(() => { active = false })
+  })
 }
 
 /** 当前壁纸模糊值（px），来自配置，默认 18。 */
@@ -2111,6 +2144,9 @@ if (!gotLock) {
     }
 
     if (trayEnabled) createTray()
+    // 无缝过渡：GUI 文档就绪后立即注入覆盖层（延续启动画面媒体），
+    // 直到主界面渲染完成（输入框出现）才淡出移除——中间不会露出 DSH 加载界面
+    armSplashCover(win, wallpaper)
     win.loadURL(url)
   })
 
