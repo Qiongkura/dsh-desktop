@@ -334,9 +334,15 @@ function wallpaperVideoUrl(file) {
 }
 
 /** 处理 dsh-wallpaper:// 请求：读本地文件并响应（含 Range 支持）。 */
+let protoLog = new Set()
 function handleWallpaperProtocol(request) {
   try {
     const url = new URL(request.url)
+    const key = url.pathname.slice(0, 40)
+    if (!protoLog.has(key)) {
+      protoLog.add(key)
+      log(`proto: ${request.url.slice(0, 90)} range=${request.headers.get('range') !== null}`)
+    }
     if (url.hostname !== 'local') return new Response('not found', { status: 404 })
     const file = decodeURIComponent(url.pathname.slice(1))
     const ext = path.extname(file).toLowerCase()
@@ -1692,8 +1698,9 @@ function createWindow(url, wallpaper) {
     }
   })
 
-  // 启动画面先行（file:// 页），后端就绪后由启动流程调用 loadURL 切换 GUI
-  showSplash(win, wallpaper)
+  // 启动画面先行（file:// 页），后端就绪后由启动流程调用 loadURL 切换 GUI。
+  // 默认模式不显示启动画面：直接用 DSH 原生的 HARNESS 加载界面。
+  if (splashMode() !== 'default') showSplash(win, wallpaper)
   mainWindow = win
   return win
 }
@@ -2158,9 +2165,17 @@ if (!gotLock) {
     // 后端就绪后由下方 loadURL 切换到 GUI
     const win = createWindow(url, wallpaper)
 
-    // 启动画面最小展示时间：file:// 加载快，且 3080 已有服务时 attach 是秒连的，
-    // 不加最小时间用户会看不到启动画面。等 splash 渲染完成后再至少停留 1.5s。
-    {
+    // 默认模式无启动画面（直接用 HARNESS 加载界面）：窗口在 GUI 渲染后经
+    // ready-to-show 显示；若后端启动慢（自起场景），8s 后强制显示品牌等待页。
+    if (splashMode() === 'default') {
+      setTimeout(() => {
+        if (!win.isDestroyed() && !win.isVisible()) showSplash(win, wallpaper)
+      }, 8000)
+    }
+
+    // 启动画面最小展示时间（仅非默认模式）：file:// 加载快，且 3080 已有服务时
+    // attach 是秒连的，不加最小时间用户会看不到启动画面。
+    if (splashMode() !== 'default') {
       const t0 = Date.now()
       const remain = () => Math.max(0, 1500 - (Date.now() - t0))
       await new Promise((resolve) => {

@@ -63,8 +63,15 @@ const tryInject = () => {
   report('INJECTED')
   const m = d.querySelector('img, video')
   if (m) {
-    m.addEventListener('load', () => report('MEDIA_LOADED'))
-    m.addEventListener('error', () => report('MEDIA_ERROR'))
+    if (m instanceof HTMLVideoElement) {
+      m.addEventListener('loadedmetadata', () => report('VIDEO_METADATA'))
+      m.addEventListener('canplay', () => report('VIDEO_CANPLAY'))
+      m.addEventListener('playing', () => report('VIDEO_PLAYING'))
+      m.addEventListener('error', () => report('VIDEO_ERROR'))
+    } else {
+      m.addEventListener('load', () => report('MEDIA_LOADED'))
+      m.addEventListener('error', () => report('MEDIA_ERROR'))
+    }
   }
   let tries = 0
   const iv = setInterval(() => {
