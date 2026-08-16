@@ -1521,6 +1521,11 @@ async function showWallpaperDialog() {
   dlg.once('ready-to-show', () => dlg.show())
   dlg.on('closed', () => {
     blurDialog = null
+    // 关闭设置后不让主窗口被 Windows 自动激活到最前（父子窗口行为），
+    // 避免"唤醒底下的界面"——主窗口失焦，焦点留在用户当前使用的窗口
+    if (mainWindow !== null && !mainWindow.isDestroyed()) {
+      mainWindow.blur()
+    }
   })
   dlg.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildWallpaperDialogHtml(blurOriginal, codeOriginal, imageOriginal, sidebarOriginal, transparentOriginal, dialogDark, videoSoundOriginal, glassOriginal, Math.round(panelOriginal * 100), splashModeOriginal, splashFileOriginal === null ? '（无）' : path.basename(splashFileOriginal), splashDurationOriginal, splashFadeOriginal))}`)
   // 当前启动媒体是视频：把时长上限推给对话框（动画时长滑块最高可调 = 视频完整时长）
