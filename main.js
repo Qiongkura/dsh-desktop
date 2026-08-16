@@ -2063,6 +2063,19 @@ if (!gotLock) {
     // 后端就绪后由下方 loadURL 切换到 GUI
     const win = createWindow(url, wallpaper)
 
+    // 启动画面最小展示时间：file:// 加载快，且 3080 已有服务时 attach 是秒连的，
+    // 不加最小时间用户会看不到启动画面。等 splash 渲染完成后再至少停留 1.5s。
+    {
+      const t0 = Date.now()
+      const remain = () => Math.max(0, 1500 - (Date.now() - t0))
+      await new Promise((resolve) => {
+        let done = false
+        const finish = () => { if (!done) { done = true; resolve() } }
+        win.webContents.once('did-finish-load', () => setTimeout(finish, remain()))
+        setTimeout(finish, 1500)
+      })
+    }
+
     const noServer = process.argv.includes('--no-server')
     if (!noServer) {
       const alive = await probe(url)
