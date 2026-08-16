@@ -1,5 +1,11 @@
 # DeepSeek Harness Desktop（DSH 桌面端）
 
+<div align="center">
+
+**中文** | [English](README.en.md)
+
+</div>
+
 把 DeepSeek Harness 的 Web GUI 装进原生桌面窗口的 Electron 壳：
 
 - **自包含发行版**：安装包内置完整的 DSH 后端运行时（`resources/runtime`，约
