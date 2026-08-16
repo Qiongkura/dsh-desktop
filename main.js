@@ -22,7 +22,7 @@
  *  --smoke-test        加载完成后打印 SMOKE_OK/SMOKE_FAIL 并退出（自动化验证用）
  */
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, protocol, shell, Tray } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, protocol, session, shell, Tray } = require('electron')
 const { spawn, execFile, execFileSync } = require('node:child_process')
 const http = require('node:http')
 const fs = require('node:fs')
@@ -287,6 +287,16 @@ const WALLPAPER_VIDEO_MIME = {
   '.ogv': 'video/ogg',
 }
 
+/** 支持的图片扩展名 → MIME（供 dsh-wallpaper:// 服务，覆盖层/壁纸用）。 */
+const WALLPAPER_IMAGE_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+}
+
 /** 判断壁纸文件是否为视频。 */
 function isVideoWallpaper(file) {
   return WALLPAPER_VIDEO_MIME[path.extname(file).toLowerCase()] !== undefined
@@ -316,7 +326,8 @@ function handleWallpaperProtocol(request) {
     const url = new URL(request.url)
     if (url.hostname !== 'local') return new Response('not found', { status: 404 })
     const file = decodeURIComponent(url.pathname.slice(1))
-    const mime = WALLPAPER_VIDEO_MIME[path.extname(file).toLowerCase()]
+    const ext = path.extname(file).toLowerCase()
+    const mime = WALLPAPER_VIDEO_MIME[ext] ?? WALLPAPER_IMAGE_MIME[ext]
     if (mime === undefined || !fs.existsSync(file)) return new Response('not found', { status: 404 })
     const stat = fs.statSync(file)
     const range = request.headers.get('range')
@@ -342,23 +353,35 @@ function handleWallpaperProtocol(request) {
   }
 }
 
-/** 解析启动画面媒体（按当前模式）：返回 { media, isVideo }。
- *  custom → splashFile；follow → 主壁纸；default → { media: null, isVideo: false }。 */
-function resolveSplashMedia(wallpaper) {
+/** 解析启动画面媒体文件（按当前模式）：返回 { file, isVideo }，无媒体返回 null。
+ *  custom → splashFile；follow → 主壁纸。 */
+function resolveSplashFile(wallpaper) {
   const mode = splashMode()
   const cfg = loadConfig()
   const custom = cfg.splashFile && fs.existsSync(cfg.splashFile) ? path.resolve(cfg.splashFile) : null
   if (mode === 'custom' && custom !== null) {
-    return isVideoWallpaper(custom)
-      ? { media: wallpaperVideoUrl(custom), isVideo: true }
-      : { media: wallpaperDataUrl(custom), isVideo: false }
+    return { file: custom, isVideo: isVideoWallpaper(custom) }
   }
   if (mode === 'follow' && wallpaper !== null) {
-    return isVideoWallpaper(wallpaper)
-      ? { media: wallpaperVideoUrl(wallpaper), isVideo: true }
-      : { media: wallpaperDataUrl(wallpaper), isVideo: false }
+    return { file: wallpaper, isVideo: isVideoWallpaper(wallpaper) }
   }
-  return { media: null, isVideo: false }
+  return null
+}
+
+/** 启动画面媒体（data URL，供 file:// 启动画面页用）。 */
+function resolveSplashMedia(wallpaper) {
+  const hit = resolveSplashFile(wallpaper)
+  if (hit === null) return { media: null, isVideo: false }
+  return hit.isVideo
+    ? { media: wallpaperVideoUrl(hit.file), isVideo: true }
+    : { media: wallpaperDataUrl(hit.file), isVideo: false }
+}
+
+/** 启动画面媒体（dsh-wallpaper:// URL，供 http 页面覆盖层用——字符串小，注入快）。 */
+function resolveSplashMediaUrl(wallpaper) {
+  const hit = resolveSplashFile(wallpaper)
+  if (hit === null) return { media: null, isVideo: false }
+  return { media: wallpaperVideoUrl(hit.file), isVideo: hit.isVideo }
 }
 
 /** 生成启动画面（加载 GUI 前显示），写入 userData 后 loadFile。
@@ -388,47 +411,27 @@ function showSplash(win, wallpaper) {
   } catch { /* 壁纸失败不阻塞启动 */ }
 }
 
+/** GUI 加载期覆盖层媒体（dsh-wallpaper:// URL，preload 经 sendSync 读取）。
+ *  由 createWindow 在创建主窗口时按当前启动画面模式计算。 */
+let splashCoverMedia = ''
+
 /** GUI 加载期间保持启动画面媒体覆盖（无缝过渡到主界面）。
- *  在 loadURL 前调用；GUI 文档就绪（did-dom-ready）时注入全屏覆盖层，
- *  主界面输入框出现（或 20s 超时）后淡出移除——加载期间不会露出
+ *  覆盖层由 main-preload.js 在页面脚本执行前注入（documentElement 一出现
+ *  就位），主界面输入框出现（或 20s 超时）后淡出移除——加载期间不会露出
  *  DSH 自己的加载画面。默认模式（无媒体）不覆盖。 */
 function armSplashCover(win, wallpaper) {
-  let active = false
-  const wc = win.webContents
-  // 注意：本 Electron 版本里文档就绪事件是 dom-ready（did-dom-ready 不触发）
-  wc.on('dom-ready', () => {
-    log(`splash cover: dom-ready (active=${active}, url=${wc.getURL()})`)
-    if (active || win.isDestroyed()) return
-    const { media, isVideo } = resolveSplashMedia(wallpaper)
-    if (media === null) {
-      log('splash cover: no media, skipping')
-      return
-    }
-    active = true
-    const cover = isVideo
-      ? `<video autoplay loop muted playsinline src="${media}" style="width:100%;height:100%;object-fit:cover"></video>`
-      : `<div style="position:absolute;inset:0;background:#101318 url('${media}') center/cover no-repeat"></div>`
-    const js = `(function(){
-      var d = document.createElement('div');
-      d.id = 'dsh-splash-cover';
-      d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#101318;overflow:hidden';
-      d.innerHTML = ${JSON.stringify(cover)};
-      (document.documentElement || document.body).appendChild(d);
-      var tries = 0;
-      var iv = setInterval(function(){
-        tries++;
-        var ready = document.querySelector('[class*="composerSeat"]') || document.querySelector('textarea') || document.querySelector('[contenteditable="true"]');
-        if (ready || tries > 400) {
-          clearInterval(iv);
-          d.style.transition = 'opacity .35s ease';
-          d.style.opacity = '0';
-          setTimeout(function(){ if (d.parentNode) d.parentNode.removeChild(d); }, 400);
-        }
-      }, 50);
-    })()`
-    win.webContents.executeJavaScript(js).then(() => log('splash cover: injected')).catch((e) => { log('splash cover: inject failed:', String(e)); active = false })
-  })
+  splashCoverMedia = resolveSplashMediaUrl(wallpaper).media ?? ''
 }
+
+// 覆盖层 preload 回传（PRELOAD_RAN/INJECTED/MEDIA_LOADED/MEDIA_ERROR/REMOVED）
+ipcMain.on('dsh:splash-cover-log', (_event, msg) => {
+  log(`splash cover: ${msg}`)
+})
+
+// 主窗口 preload 查询启动画面媒体 URL（同步返回，纯字符串）
+ipcMain.on('dsh:splash-cover-query', (event) => {
+  event.returnValue = splashCoverMedia
+})
 
 /** 当前壁纸模糊值（px），来自配置，默认 18。 */
 function wallpaperBlur() {
@@ -1551,7 +1554,7 @@ function createWindow(url, wallpaper) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      preload: path.join(__dirname, 'titlebar', 'preload.js'),
+      preload: path.join(__dirname, 'main-preload.js'),
     },
   })
 
@@ -2071,6 +2074,9 @@ if (!gotLock) {
 
     // 视频壁纸协议：把本地视频文件流式供给渲染进程（http 页面无法直接加载 file://）
     protocol.handle('dsh-wallpaper', handleWallpaperProtocol)
+
+    // 启动画面无缝过渡的 preload 已并入主窗口 webPreferences.preload
+    // （main-preload.js，含标题栏 + 覆盖层；splash/对话框页面自动跳过）
 
     const runtime = resolveRuntime()
     if (runtime === null) {
