@@ -72,14 +72,14 @@ const tryInject = () => {
     v.loop = true
     v.muted = true
     v.playsInline = true
-    v.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:2147483647;cursor:pointer'
+    v.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:2147483647'
     document.documentElement.appendChild(v)
     bootEl = v
   } else {
     // 图片：全屏 div，背景先主色（加载期无黑），图片就绪后覆盖
     const d = document.createElement('div')
     d.id = 'dsh-wallpaper-boot'
-    d.style.cssText = `position:fixed;inset:0;z-index:2147483647;cursor:pointer;background:${bg} center/cover no-repeat;background-image:url('${media}');filter:blur(${blur}px)`
+    d.style.cssText = `position:fixed;inset:0;z-index:2147483647;background:${bg} center/cover no-repeat;background-image:url('${media}');filter:blur(${blur}px)`
     document.documentElement.appendChild(d)
     bootEl = d
   }
