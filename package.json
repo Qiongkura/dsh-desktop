@@ -26,6 +26,7 @@
     },
     "files": [
       "main.js",
+      "main-preload.js",
       "close-dialog/*",
       "wallpaper-dialog/*",
       "titlebar/*",
@@ -43,6 +44,10 @@
       {
         "from": "runtime",
         "to": "runtime"
+      },
+      {
+        "from": ".toolchain/ffmpeg/ffmpeg.exe.gz",
+        "to": "ffmpeg.exe.gz"
       }
     ],
     "win": {

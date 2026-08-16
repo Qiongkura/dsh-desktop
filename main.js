@@ -28,6 +28,7 @@ const http = require('node:http')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const zlib = require('node:zlib')
 const { Readable } = require('node:stream')
 
 const APP_NAME = 'DeepSeek Harness Desktop'
@@ -313,6 +314,81 @@ const WALLPAPER_IMAGE_MIME = {
 /** 判断壁纸文件是否为视频。 */
 function isVideoWallpaper(file) {
   return WALLPAPER_VIDEO_MIME[path.extname(file).toLowerCase()] !== undefined
+}
+
+// ------------------------------------------------------------ 自动转码 ----
+
+/** 检测视频编码：'h264' | 'hevc' | 'unknown'（采样文件头尾搜编码标记）。
+ *  HEVC（H.265）在 Electron 无可靠硬解 → 软解卡顿，需自动转码为 H.264。 */
+function videoCodec(file) {
+  try {
+    const size = fs.statSync(file).size
+    const fd = fs.openSync(file, 'r')
+    const bufs = []
+    for (const [pos, len] of [[0, 16 * 1024 * 1024], [Math.max(0, size - 16 * 1024 * 1024), 16 * 1024 * 1024]]) {
+      const b = Buffer.alloc(Math.min(len, size - pos))
+      fs.readSync(fd, b, 0, b.length, pos)
+      bufs.push(b)
+    }
+    fs.closeSync(fd)
+    const s = Buffer.concat(bufs).toString('latin1')
+    if (s.includes('avc1')) return 'h264'
+    if (s.includes('hvc1') || s.includes('hev1')) return 'hevc'
+    return 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
+/** ffmpeg 路径：开发用 .toolchain/ffmpeg/ffmpeg.exe；打包用 resources/ffmpeg.exe.gz
+ *  （首次使用解压到 userData）。不可用返回 null。 */
+function ffmpegPath() {
+  const dev = path.join(__dirname, '.toolchain', 'ffmpeg', 'ffmpeg.exe')
+  if (fs.existsSync(dev)) return dev
+  const gz = path.join(process.resourcesPath ?? '', 'ffmpeg.exe.gz')
+  if (fs.existsSync(gz)) {
+    const out = path.join(app.getPath('userData'), 'ffmpeg.exe')
+    if (!fs.existsSync(out)) {
+      try {
+        fs.writeFileSync(out, zlib.gunzipSync(fs.readFileSync(gz)))
+        log(`ffmpeg unpacked to ${out}`)
+      } catch {
+        return null
+      }
+    }
+    return out
+  }
+  return null
+}
+
+/** HEVC 视频自动转码为 H.264（CRF 17，视觉无损），输出同目录「原名-H264.mp4」。
+ *  非 HEVC / 已有转码版 / 无 ffmpeg：直接回调原路径；转码完成回调转码版路径。 */
+function ensureTranscoded(file, cb) {
+  if (!isVideoWallpaper(file) || videoCodec(file) !== 'hevc') return cb(file)
+  const out = path.join(path.dirname(file), `${path.basename(file, path.extname(file))}-H264.mp4`)
+  if (fs.existsSync(out)) {
+    log(`using existing transcode: ${out}`)
+    return cb(out)
+  }
+  const ff = ffmpegPath()
+  if (ff === null) return cb(file)
+  log(`auto-transcoding HEVC video (this can take minutes): ${file}`)
+  const child = spawn(ff, ['-y', '-i', file, '-c:v', 'libx264', '-crf', '17', '-preset', 'medium',
+    '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', out], {
+    windowsHide: true,
+    stdio: ['ignore', 'ignore', 'pipe'],
+  })
+  child.stderr.on('data', () => { /* 进度由完成事件呈现 */ })
+  child.on('error', () => cb(file))
+  child.on('exit', (code) => {
+    if (code === 0 && fs.existsSync(out)) {
+      log(`transcode done: ${out}`)
+      cb(out)
+    } else {
+      log(`transcode failed (code=${code}), falling back to original`)
+      cb(file)
+    }
+  })
 }
 
 /**
@@ -1448,15 +1524,15 @@ ipcMain.on('dsh:wallpaper-pick-image', async (_event) => {
     ],
   })
   if (result.canceled || result.filePaths.length === 0) return
-  const file = result.filePaths[0]
-  imageDraft = file
-  try {
-    await applyWallpaperFile(win, file)
-    log(`wallpaper preview: ${file}`)
-  } catch (error) {
-    log('wallpaper preview failed:', String(error))
-  }
-  dlg.webContents.send('dsh:wallpaper-image-chosen', file)
+  const picked = result.filePaths[0]
+  // HEVC 视频自动转码为 H.264（画质无损），完成后用转码版预览
+  ensureTranscoded(picked, (file) => {
+    imageDraft = file
+    applyWallpaperFile(win, file)
+      .then(() => log(`wallpaper preview: ${file}`))
+      .catch((error) => log('wallpaper preview failed:', String(error)))
+    dlg.webContents.send('dsh:wallpaper-image-chosen', file)
+  })
 })
 
 // 对话框内清除图片/视频：即时移除壁纸变量（伪元素失去背景图即无壁纸）
@@ -1551,8 +1627,12 @@ ipcMain.on('dsh:wallpaper-pick-splash', async (_event, mode) => {
     ],
   })
   if (result.canceled || result.filePaths.length === 0) return
-  splashFileDraft = result.filePaths[0]
-  dlg.webContents.send('dsh:wallpaper-splash-image-chosen', splashFileDraft)
+  const picked = result.filePaths[0]
+  // HEVC 视频自动转码为 H.264（画质无损），完成后用转码版
+  ensureTranscoded(picked, (file) => {
+    splashFileDraft = file
+    dlg.webContents.send('dsh:wallpaper-splash-image-chosen', file)
+  })
 })
 
 // 对话框内清除启动素材
