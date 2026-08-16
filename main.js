@@ -1881,21 +1881,20 @@ function createWindow(url, wallpaper) {
     // 启动画面（file:// 壁纸页）不算 GUI 加载完成
     if (!win.webContents.getURL().startsWith(url)) return
     log(`page loaded: ${win.webContents.getURL()}`)
-    // 临时探测：轨迹视图/对话列（诊断用）
-    win.webContents.executeJavaScript(`(() => {
-      const out = {}
-      for (const sel of ['[data-conversation-composer-overlay]', '[data-conversation-scroll]', '[data-composer-seat]']) {
-        const els = document.querySelectorAll(sel)
-        out[sel] = els.length
-        if (els.length > 0) {
-          const e = els[0]
-          out[sel + ' cls'] = typeof e.className === 'string' ? e.className.slice(0, 100) : String(e.className)
-          out[sel + ' tag'] = e.tagName
-        }
-      }
-      out.text = document.body.innerText.includes('Duration') || document.body.innerText.includes('轨迹')
-      return out
-    })()`).then((r) => log('DOM probe: ' + JSON.stringify(r).slice(0, 900))).catch((e) => log('DOM probe failed: ' + String(e)))
+    // 临时诊断：轨迹元素探测轮询（打开轨迹视图后记录一次）
+    const trajProbe = setInterval(() => {
+      if (win.isDestroyed()) { clearInterval(trajProbe); return }
+      win.webContents.executeJavaScript(`(() => {
+        const els = document.querySelectorAll('[data-conversation-composer-overlay]')
+        if (els.length === 0) return { found: 0 }
+        const e = els[0]
+        const cs = getComputedStyle(e)
+        return { found: els.length, cls: (typeof e.className === 'string' ? e.className : '').slice(0, 80),
+          inRoot: !!e.closest('#root'), bgImage: cs.backgroundImage.slice(0, 50), filter: cs.backdropFilter }
+      })()`).then((r) => {
+        if (r && r.found) { log('TRAJ probe: ' + JSON.stringify(r)); clearInterval(trajProbe) }
+      }).catch(() => {})
+    }, 3000)
     // 启动层（#dsh-wallpaper-boot）由 preload 自管理：主界面渲染完成且
     // 满足最小展示时长后自行移除（duration>0 时媒体要播满，不能在此提前移除）
     // 页面重载后 insertCSS 的 key 失效，必须重置才能重新注入
