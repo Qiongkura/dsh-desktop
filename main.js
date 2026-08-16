@@ -733,8 +733,11 @@ function injectWallpaperCss(win) {
       backdrop-filter: blur(var(--dsh-glass-blur, 10px)) !important;
       -webkit-backdrop-filter: blur(var(--dsh-glass-blur, 10px)) !important;
     }
-    /* 轨迹内部各层默认是不透明背景（会盖住玻璃），全部改透明让壁纸透出 */
-    #root [data-conversation-composer-overlay] * {
+    /* 轨迹内部大面积容器（工具栏/时间线底/单元格）默认不透明背景会盖住玻璃，
+       改为透明让壁纸透出；色条（span）与状态标签等小元素颜色保留 */
+    #root [data-conversation-composer-overlay] [class*='toolbar'],
+    #root [data-conversation-composer-overlay] [class*='plot'],
+    #root [data-conversation-composer-overlay] [class*='cell'] {
       background-color: transparent !important;
     }`
   wallpaperCssKey = win.webContents.insertCSS(css)
