@@ -1206,7 +1206,8 @@ function setGlassBlurVar(value) {
 function setPanelAlphaVar(value) {
   const win = mainWindow
   if (win === null || win.isDestroyed()) return
-  const v = Math.max(0, Math.min(1, Number(value) || 0.55))
+  const n = Number(value)
+  const v = Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0.55
   win.webContents.executeJavaScript(
     `document.body.style.setProperty('--dsh-wallpaper-panel-alpha', '${v}');
      if (typeof window.__dshApplyWallpaperVars === 'function') window.__dshApplyWallpaperVars()`,
@@ -1354,7 +1355,8 @@ ipcMain.on('dsh:wallpaper-commit', (_event, payload) => {
     if (payload.videoSound !== undefined) cfg.wallpaperVideoSound = payload.videoSound === true
     if (payload.glassBlur !== undefined) cfg.glassBlur = Math.max(0, Math.min(100, Number(payload.glassBlur) || 0))
     if (payload.panelAlpha !== undefined) {
-      cfg.panelAlpha = Math.max(0, Math.min(1, Number(payload.panelAlpha) || 0.55))
+      const pn = Number(payload.panelAlpha)
+      cfg.panelAlpha = Number.isFinite(pn) ? Math.max(0, Math.min(1, pn)) : 0.55
     }
     saveConfig(cfg)
     const T = payload.transparent
