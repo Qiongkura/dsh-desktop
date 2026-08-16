@@ -394,8 +394,10 @@ function showSplash(win, wallpaper) {
  *  DSH 自己的加载画面。默认模式（无媒体）不覆盖。 */
 function armSplashCover(win, wallpaper) {
   let active = false
-  win.webContents.on('did-dom-ready', () => {
-    log(`splash cover: did-dom-ready (active=${active}, url=${win.webContents.getURL()})`)
+  const wc = win.webContents
+  // 注意：本 Electron 版本里文档就绪事件是 dom-ready（did-dom-ready 不触发）
+  wc.on('dom-ready', () => {
+    log(`splash cover: dom-ready (active=${active}, url=${wc.getURL()})`)
     if (active || win.isDestroyed()) return
     const { media, isVideo } = resolveSplashMedia(wallpaper)
     if (media === null) {
@@ -415,7 +417,7 @@ function armSplashCover(win, wallpaper) {
       var tries = 0;
       var iv = setInterval(function(){
         tries++;
-        var ready = document.querySelector('[class*="composerSeat"]') || document.querySelector('textarea');
+        var ready = document.querySelector('[class*="composerSeat"]') || document.querySelector('textarea') || document.querySelector('[contenteditable="true"]');
         if (ready || tries > 400) {
           clearInterval(iv);
           d.style.transition = 'opacity .35s ease';
