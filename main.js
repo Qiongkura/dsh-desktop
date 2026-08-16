@@ -724,14 +724,18 @@ function injectWallpaperCss(win) {
     #root [class*='newSession'] {
       background: var(--dsh-t-new-session, transparent) !important;
     }
-    /* 轨迹视图液态玻璃：与输入框共用同一套代码/变量
-       （--dsh-glass-blur 模糊 + 面板色渐变），输入框模糊滑块同时控制两者 */
+    /* 轨迹视图液态玻璃：与输入框共用 --dsh-glass-blur 模糊；
+       面板色用低透明度（22%），壁纸明显透出，不再整屏发白 */
     #root [data-conversation-composer-overlay] {
       background: linear-gradient(to bottom,
         transparent 0px,
-        var(--dsh-wallpaper-panel, rgba(255,255,255,0.55)) 24px) !important;
+        rgba(255,255,255,0.22) 24px) !important;
       backdrop-filter: blur(var(--dsh-glass-blur, 10px)) !important;
       -webkit-backdrop-filter: blur(var(--dsh-glass-blur, 10px)) !important;
+    }
+    /* 轨迹内部各层默认是不透明背景（会盖住玻璃），全部改透明让壁纸透出 */
+    #root [data-conversation-composer-overlay] * {
+      background-color: transparent !important;
     }`
   wallpaperCssKey = win.webContents.insertCSS(css)
   wallpaperCssKey.catch(() => { wallpaperCssKey = null })
@@ -1881,20 +1885,6 @@ function createWindow(url, wallpaper) {
     // 启动画面（file:// 壁纸页）不算 GUI 加载完成
     if (!win.webContents.getURL().startsWith(url)) return
     log(`page loaded: ${win.webContents.getURL()}`)
-    // 临时诊断：轨迹元素探测轮询（打开轨迹视图后记录一次）
-    const trajProbe = setInterval(() => {
-      if (win.isDestroyed()) { clearInterval(trajProbe); return }
-      win.webContents.executeJavaScript(`(() => {
-        const els = document.querySelectorAll('[data-conversation-composer-overlay]')
-        if (els.length === 0) return { found: 0 }
-        const e = els[0]
-        const cs = getComputedStyle(e)
-        return { found: els.length, cls: (typeof e.className === 'string' ? e.className : '').slice(0, 80),
-          inRoot: !!e.closest('#root'), bgImage: cs.backgroundImage.slice(0, 50), filter: cs.backdropFilter }
-      })()`).then((r) => {
-        if (r && r.found) { log('TRAJ probe: ' + JSON.stringify(r)); clearInterval(trajProbe) }
-      }).catch(() => {})
-    }, 3000)
     // 启动层（#dsh-wallpaper-boot）由 preload 自管理：主界面渲染完成且
     // 满足最小展示时长后自行移除（duration>0 时媒体要播满，不能在此提前移除）
     // 页面重载后 insertCSS 的 key 失效，必须重置才能重新注入
