@@ -6,6 +6,15 @@
 
 </div>
 
+> [!CAUTION]
+> **Known issue: slow backend startup (~30s) + three-stage startup animation**
+>
+> When launched with `--dsh-root` / `start-desktop.ps1` (dev mode), the backend runs the whole DSH from source via `tsx`; cold start measures about **33s** (bundled runtime warm ~15s, cold ~28s — the slowness is mostly DSH's own web boot, not tsx). Because the backend is not ready within **8 seconds**, `main.js` falls back to the **old splash.html**, producing a "three-stage" animation: old splash → web loading toast (bottom-right "starting service") → main UI.
+>
+> For a fast start: **double-click `DeepSeek Harness Desktop.exe` without `--dsh-root`** to use the bundled runtime (~245MB production closure, entry `lib/bin.js`). Note the bundled mode uses an isolated data directory `AppData\Roaming\DeepSeek Harness Desktop\home`, separate from `~/.dsh` sessions/storage.
+>
+> Also: the `Animation duration` (minimum splash display seconds) defaults to 10s, which further lengthens perceived startup; it can be reduced.
+
 An Electron shell that packages the DeepSeek Harness Web GUI into a native desktop window with deep interface customization: wallpaper / frosted glass / liquid glass / splash screen / auto-transcoding, all configurable through the "Interface Settings" panel in Web settings.
 
 - **Self-contained distribution**: The installer includes a complete DSH backend runtime (approximately 250MB production closure). Any Windows x64 user can download, install, and double-click to run without installing Node.js / pnpm / cloning the repository;
