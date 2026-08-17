@@ -31,6 +31,18 @@ contextBridge.exposeInMainWorld('dshTitlebar', {
   onMenuData: (cb) => ipcRenderer.on('dsh:tb-menu-data', (_event, payload) => cb(payload)),
 })
 
+// ------------------------------------------------------------ 界面设置桥 ----
+
+// web 设置面板「界面设置」（dsh-interface-settings 插件）经此通道读写
+// Electron 配置并由主进程应用（含视频壁纸/视频声音等桌面独有能力）。
+contextBridge.exposeInMainWorld('dshInterfaceSettings', {
+  get: () => ipcRenderer.sendSync('dsh:interface-settings-get'),
+  preview: (settings) => ipcRenderer.send('dsh:interface-settings-preview', settings),
+  commit: (settings) => ipcRenderer.send('dsh:interface-settings-commit', settings),
+  pick: (kind) => ipcRenderer.invoke('dsh:interface-settings-pick', kind),
+  clear: (kind) => ipcRenderer.send('dsh:interface-settings-clear', kind),
+})
+
 // ------------------------------------------------------------ 壁纸式启动过渡 --
 
 let payload = {}
