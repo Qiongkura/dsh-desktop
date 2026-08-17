@@ -1,7 +1,7 @@
 {
   "name": "dsh-desktop",
   "productName": "DeepSeek Harness Desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DeepSeek Harness Web GUI 桌面端：原生窗口 + 本地后端自动管理",
   "main": "main.js",
   "author": "dsh-desktop",
