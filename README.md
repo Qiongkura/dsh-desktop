@@ -39,6 +39,12 @@
 | 一体化标题栏 | 自绘标题栏：返回/前进/菜单/最小化/最大化/关闭 |
 | Token 用量统计 | 内置最新 DSH runtime：按日期/模型/会话/工作区分组，Token 用量排序，子代理用量自动合并到根会话 |
 
+## 面板展示
+
+| 主界面 | 界面设置 | 用量统计 |
+| --- | --- | --- |
+| ![主界面](docs/images/main-ui.png) | ![界面设置](docs/images/interface-settings.png) | ![用量统计](docs/images/usage-stats.png) |
+
 ## 架构与实现
 
 ```
