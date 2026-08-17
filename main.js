@@ -193,6 +193,7 @@ function startServer(runtime, port) {
     cwd: runtime.root,
     env,
     windowsHide: true,
+    detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   child.stdout.on('data', (chunk) => { process.stdout.write(chunk); writeLog('dsh-web.out.log', chunk) })
@@ -272,19 +273,38 @@ function dominantColor(file) {
  *  大图（手机原图可达数十 MB）会拖死渲染器（解码 + 全屏毛玻璃逐帧重采样），
  *  因此用 nativeImage 缩放到最长边 max（默认 3840px）后再编码（4K 屏满清晰度；
  *  之前的 1920px 在 4K 屏上被拉伸 2 倍导致看起来模糊）。 */
-function wallpaperDataUrl(file, max = 3840) {
+function wallpaperDataUrl(file, max = 2560) {
   const ext = path.extname(file).toLowerCase()
   const mime = {
     '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
     '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp',
   }[ext] || 'image/png'
+  // 内联样式值超过 ~2MB 会被 Blink 截断（实测 4MB 注入后只剩 2MB），
+  // 大图（如整屏截图）的 data URL 必须压到安全线以下，否则背景图残缺、
+  // 壁纸整块消失（窗口露黑底）。上限 1.5MB（base64 前字节数）。
+  const DATA_URL_CAP = 1500 * 1024
   try {
     const img = nativeImage.createFromPath(file)
     if (!img.isEmpty()) {
       const { width } = img.getSize()
-      const resized = width > max ? img.resize({ width: max }) : img
-      const buf = ext === '.png' ? resized.toPNG() : resized.toJPEG(92)
-      return `data:${mime};base64,${buf.toString('base64')}`
+      let resized = width > max ? img.resize({ width: max }) : img
+      let outMime = mime
+      let quality = 85
+      let buf = ext === '.png' ? resized.toPNG() : resized.toJPEG(quality)
+      // 逐档降质；仍超限则继续缩宽（每次从原图重新缩放，避免累积劣化）
+      while (buf.length > DATA_URL_CAP && quality > 35) {
+        quality -= 10
+        buf = resized.toJPEG(quality)
+        outMime = 'image/jpeg'
+      }
+      let w = max
+      while (buf.length > DATA_URL_CAP && w > 640) {
+        w = Math.round(w * 0.75)
+        resized = img.resize({ width: w })
+        buf = resized.toJPEG(quality)
+        outMime = 'image/jpeg'
+      }
+      return `data:${outMime};base64,${buf.toString('base64')}`
     }
   } catch { /* 回退到原文件 */ }
   return `data:${mime};base64,${fs.readFileSync(file).toString('base64')}`
@@ -608,6 +628,12 @@ function panelAlpha() {
   return Number.isFinite(n) && n >= 0 && n <= 1 ? n : 0.55
 }
 
+/** 工具调用行渐变（0-100，0=全黑 100=全白），默认 50（半白半黑）。 */
+function toolGray() {
+  const n = Number(loadConfig().toolGray)
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : 50
+}
+
 /** 启动画面模式：default / follow / custom（自定义图片或视频），默认 default。
  *  兼容旧版本保存的 image / animation（合并为 custom）。 */
 function splashMode() {
@@ -720,6 +746,15 @@ function injectWallpaperCss(win) {
     #root [data-phase='hero'] [class*='composerSeat']::after {
       display: none !important;
     }
+    /* 文字颜色跟随滑杆：覆盖工具行/思考/产物/消息底部操作栏；error态保留红色 */
+    #root [data-time-hover-root] button,
+    #root [data-time-hover-root] span {
+      color: hsl(0, 0%, calc(100% - var(--dsh-tool-gray, 50%))) !important;
+    }
+    #root [data-tool][data-state="error"] *,
+    #root [data-variant][data-state="error"] * {
+      color: var(--dsw-alias-state-error-primary, #e53935) !important;
+    }
     /* 侧栏"新对话"按钮：透明开关由 --dsh-t-new-session 控制 */
     #root [class*='newSession'] {
       background: var(--dsh-t-new-session, transparent) !important;
@@ -824,8 +859,14 @@ function clearWallpaperVideoLayer(win) {
   })()`)
 }
 
-/** 应用壁纸文件（图片或视频自动分派）。 */
+/** 应用壁纸文件（图片或视频自动分派）。null 时清除壁纸。 */
 function applyWallpaperFile(win, file) {
+  if (file === null || file === undefined) {
+    clearWallpaperVideoLayer(win).catch(() => {})
+    return win.webContents.executeJavaScript(
+      `document.body.style.removeProperty('--dsh-wallpaper-url')`,
+    ).catch(() => {})
+  }
   if (isVideoWallpaper(file)) {
     clearWallpaperVideoLayer(win).catch(() => {})
     return setWallpaperVideoLayer(win, file)
@@ -934,6 +975,8 @@ function applyWallpaper(win, wallpaper) {
     document.body.style.setProperty('--dsh-glass-blur', '${glassBlur()}px')
     // 面板半透明强度（独立滑杆控制，默认 0.55）
     document.body.style.setProperty('--dsh-wallpaper-panel-alpha', '${panelAlpha()}')
+    // 工具调用行渐变（0-100%，控制白/黑分界点位置）
+    document.body.style.setProperty('--dsh-tool-gray', '${toolGray()}%')
     document.body.style.setProperty('--dsh-wallpaper-code-alpha', '${wallpaperCodeAlpha()}')
     const applyVars = () => {
       const isDark = document.body.hasAttribute('data-ds-dark-theme')
@@ -1015,7 +1058,7 @@ function applyWallpaper(win, wallpaper) {
   })()`).then((state) => {
     log('wallpaper applied: ' + state)
   }).catch((error) => log('wallpaper scheme detection failed:', String(error)))
-  applyWallpaperFile(win, wallpaper).catch((error) => log('wallpaper layer failed:', String(error)))
+  if (wallpaper !== null) applyWallpaperFile(win, wallpaper).catch((error) => log('wallpaper layer failed:', String(error)))
 }
 
 /** 文件菜单：选择壁纸图片/视频，立即生效（不重载页面）。 */
@@ -1493,6 +1536,7 @@ function interfaceSettingsSnapshot() {
     transparent: transparentFlags(),
     glassBlur: glassBlur(),
     panelAlpha: panelAlpha(),
+    toolGray: toolGray(),
     splashMode: splashMode(),
     splashFile: configuredSplashFile(),
     splashDuration: splashDuration(),
@@ -1513,6 +1557,8 @@ function applyInterfaceSettings(win, s, persist) {
   if (Number.isFinite(glass)) setGlassBlurVar(glass)
   const panel = Number(s?.panelAlpha)
   if (Number.isFinite(panel)) setPanelAlphaVar(panel)
+  const gray = Number(s?.toolGray)
+  if (Number.isFinite(gray)) setToolGrayVar(gray)
   if (s?.transparent !== undefined) setTransparentFlags(s.transparent)
   if (typeof s?.videoSound === 'boolean') setWallpaperVideoSoundLive(win, s.videoSound).catch(() => {})
   // 壁纸：视频优先；null 清除。未变化不重建壁纸层（避免预览时视频重载闪烁）
@@ -1539,16 +1585,18 @@ function applyInterfaceSettings(win, s, persist) {
       const pn = Number(s.panelAlpha)
       patch.panelAlpha = Number.isFinite(pn) ? Math.max(0, Math.min(1, pn)) : 0.55
     }
+    if (s?.toolGray !== undefined) {
+      const tg = Number(s.toolGray)
+      patch.toolGray = Number.isFinite(tg) ? Math.max(0, Math.min(100, tg)) : 50
+    }
     if (s?.transparent !== undefined) {
       patch.transparentNewSession = s.transparent.newSession !== false
       patch.transparentInput = s.transparent.input !== false
       patch.transparentSidebar = s.transparent.sidebar !== false
       patch.transparentMain = s.transparent.main !== false
     }
-    if (wallpaper === null) patch.wallpaper = undefined
-    else patch.wallpaper = wallpaper
-    if (side === null) patch.sidebarWallpaper = undefined
-    else patch.sidebarWallpaper = side
+    if (wallpaper !== null) patch.wallpaper = wallpaper
+    if (side !== null) patch.sidebarWallpaper = side
     if (typeof s?.videoSound === 'boolean') patch.wallpaperVideoSound = s.videoSound
     if (s?.splashMode !== undefined) {
       patch.splashMode = ['default', 'follow', 'custom'].includes(s.splashMode) ? s.splashMode : 'default'
@@ -1762,6 +1810,17 @@ function setPanelAlphaVar(value) {
   win.webContents.executeJavaScript(
     `document.body.style.setProperty('--dsh-wallpaper-panel-alpha', '${v}');
      if (typeof window.__dshApplyWallpaperVars === 'function') window.__dshApplyWallpaperVars()`,
+  ).catch(() => {})
+}
+
+/** 工具调用行灰度（实时预览用，0-100，0=原色 100=黑白）。 */
+function setToolGrayVar(value) {
+  const win = mainWindow
+  if (win === null || win.isDestroyed()) return
+  const n = Number(value)
+  const v = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0
+  win.webContents.executeJavaScript(
+    `document.body.style.setProperty('--dsh-tool-gray', '${v}%')`,
   ).catch(() => {})
 }
 
@@ -2101,6 +2160,25 @@ function createWindow(url, wallpaper) {
     applySidebarWallpaper(win)
     injectTitlebar(win)
     tbSendNav(win)
+    // 防御：insertCSS 可能因跨域限制静默失败，用 <style> 兜底注入工具行颜色规则
+    win.webContents.executeJavaScript(`(() => {
+      if (!document.getElementById('dsh-tool-gray-css')) {
+        const s = document.createElement('style')
+        s.id = 'dsh-tool-gray-css'
+        s.textContent = \`
+          #root [data-tool] *,
+          #root [data-variant="think"] *,
+          #root [data-produced-files-row] * {
+            color: hsl(0, 0%, calc(100% - var(--dsh-tool-gray, 50%))) !important;
+          }
+          #root [data-tool][data-state="error"] *,
+          #root [data-variant][data-state="error"] * {
+            color: var(--dsw-alias-state-error-primary, #e53935) !important;
+          }
+        \`
+        document.head.appendChild(s)
+      }
+    })()`).catch(() => {})
     // GUI 加载完成后把窗口背景恢复为页面主题色（滚动露底时不露启动画面主色）
     win.webContents.executeJavaScript('getComputedStyle(document.body).backgroundColor')
       .then((color) => {
