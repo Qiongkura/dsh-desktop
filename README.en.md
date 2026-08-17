@@ -1,4 +1,4 @@
-# DeepSeek Harness Desktop
+# dsh-desktop
 
 <div align="center">
 
@@ -6,122 +6,175 @@
 
 </div>
 
-An Electron shell that packages the DeepSeek Harness Web GUI into a native desktop window:
+An Electron shell that packages the DeepSeek Harness Web GUI into a native desktop window with deep interface customization: wallpaper / frosted glass / liquid glass / splash screen / auto-transcoding, all configurable through the "Interface Settings" panel in Web settings.
 
-- **Self-contained distribution**: The installer includes a complete DSH backend runtime (`resources/runtime`, approximately 250MB production closure). Any Windows x64 user can download, install, and **double-click to run** without installing Node.js / pnpm / cloning the DSH repository;
-- Automatic detection of `http://127.0.0.1:3080`: If the GUI is already running, it directly takes over (avoids restarting the backend);
-- Otherwise, it launches the built-in backend (built-in node.exe + `@deepseek-ai/dsh`'s `lib/bin.js`), then opens the window when ready;
-- Clicking the × prompts a DeepSeek Harness-style query: **Hide to System Tray** or **Exit Directly**. After hiding, the application and backend continue running in the background, the taskbar icon disappears, and clicking/right-clicking the system tray icon restores or exits;
-- Supports single instance (re-launching while hidden restores the window), opening external links in the system browser, and menu bar shortcuts;
-- **Custom wallpaper**: The "Interface Settings…" entry in the titlebar/tray menu (or the "Interface Settings" section inside the Web settings) configures wallpaper, video wallpaper, blur, transparent areas, liquid glass, splash screen, HEVC auto-transcode and more — all persisted in the Electron config; also supports `--wallpaper=<image path>` / `DSH_WALLPAPER` / config option `wallpaper`;
-- Built-in mode isolates DSH_HOME to the application data directory (`%APPDATA%\DeepSeek Harness Desktop\home`), without interfering with existing installations;
-- Can be packaged as a green single-file exe (portable) or an unpack-and-use ZIP package.
+- **Self-contained distribution**: The installer includes a complete DSH backend runtime (approximately 250MB production closure). Any Windows x64 user can download, install, and double-click to run without installing Node.js / pnpm / cloning the repository;
+- **Interface Settings**: Wallpaper, video wallpaper, blur, transparent areas, input box/trace liquid glass, splash screen (mode/material/duration/fade), HEVC auto-transcoding... all configurable in one panel (title bar/tray "Interface Settings..." quick access, configuration persisted in Electron config);
+- **Auto-detection and takeover**: Automatically detects `http://127.0.0.1:3080`: if GUI is already running, it directly takes over; otherwise, it launches the built-in backend;
 
-## How It Works
+## Features
+
+| Feature | Description |
+| --- | --- |
+| Wallpaper Image/Video | Select image/video as interface background via title bar/tray "Interface Settings..." or Web settings (supports dynamic video wallpapers) |
+| Wallpaper Blur | Independent slider (0-100px), real-time blur on wallpaper layer |
+| Code Block Transparency | Independent slider (8%-100%), background color of code blocks in dialogs |
+| Area Transparency Toggles | Four independent toggles for new conversation / input box / left sidebar / main interface |
+| Sidebar Independent Wallpaper | Left sidebar can have a separate wallpaper (or share with main image) |
+| Input Box Liquid Glass | Input area frosted glass (`backdrop-filter` + panel color gradient), independent blur slider (minimum 10px to ensure text blurs) |
+| Panel Transparency | Independent slider (0-90%), panel semi-transparency strength |
+| Trace Interface Glass | Shares the same glass code and slider as input box, intelligent transparency based on color saturation (preserves color bars/status labels) |
+| Splash Screen | Three modes: default / follow theme / custom (image or video) |
+| Animation Duration | 0-10 second slider; when video is selected, upper limit automatically equals video duration (ensures complete playback) |
+| Fade-out Duration | 0-2 second slider, fade-out duration when splash screen ends |
+| Click to Skip | Click anywhere during splash animation to skip (after main interface is ready) |
+| HEVC Auto-transcoding | Automatically transcodes HEVC (H.265) videos to H.264 (CRF 17 visually lossless) for smooth hardware decoding |
+| Video Wallpaper Protocol | `dsh-wallpaper://` privileged protocol, streams local videos (supports Range) |
+| Video Sound | Optional playback of wallpaper video sound |
+| Integrated Title Bar | Custom title bar: back/forward/menu/minimize/maximize/close |
+
+## Architecture & Implementation
 
 ```
-┌───────────────────────────────┐
-│  DeepSeek Harness Desktop     │  (Electron)
-│  ┌───────────┐   ┌─────────┐  │
-│  │ Main       │──▶│ Detect  │── Found → Take over (external service)
-│  │ Process    │   │ 3080    │  │
-│  │ main.js    │   └─────────┘  │
-│  │           │                │
-│  │           │   ┌─────────┐  │
-│  │           │──▶│ Built-in│── Built-in node.exe + lib/bin.js web
-│  │           │   │ Backend │    (resources/runtime, pnpm deploy closure)
-│  │           │   └─────────┘  └── Native window loads GUI
-│  └─────┬─────┘
-└────────┼──────────────────────────┘
-  External mode: DSH_ROOT / --dsh-root specifies repository (G:\deepseek-harness or other)
+┌──────────────────────────────────────────────────┐
+│  DeepSeek Harness Desktop (Electron)             │
+│  ┌────────────────────────────────────────────┐  │
+│  │ main.js Main Process                       │  │
+│  │ · Config/Logs/Menu/Tray/Single Instance     │  │
+│  │ · Backend detection & launch (attach or     │  │
+│  │   built-in runtime)                        │  │
+│  │ · dsh-wallpaper:// protocol (streaming)     │  │
+│  │ · Wallpaper/Glass/Transparency CSS injection│  │
+│  │ · Splash screen media parsing + preload     │  │
+│  │ · HEVC detection + ffmpeg auto-transcode    │  │
+│  │ · Settings dialog (wallpaper-dialog/)       │  │
+│  └────────────────────────────────────────────┘  │
+│  ┌────────────────────────────────────────────┐  │
+│  │ main-preload.js (before page scripts)      │  │
+│  │ · Integrated title bar contextBridge       │  │
+│  │ · Splash layer injection (video/image +    │  │
+│  │   duration/fade/skip)                      │  │
+│  │ · Splash mode exposed to page              │  │
+│  └────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────┘
+        │ attach / launch
+        ▼
+┌──────────────────────────────────────────────────┐
+│ DSH Web GUI (http://127.0.0.1:3080)             │
+│ · AppRoot loading gate (wallpaper mode doesn't   │
+│   render HARNESS card)                           │
+│ · Wallpaper/Glass/Transparency all controlled by │
+│   CSS injected by main process                   │
+└──────────────────────────────────────────────────┘
 ```
+
+Key technical points:
+
+- **Wallpaper layer**: `body::before/::after` (negative z-index, doesn't intercept input, no JS layer);
+- **Liquid glass**: `::before` + `backdrop-filter` + panel color gradient, unified for image/video;
+- **Splash layer**: Preload injects before page scripts execute (within 11ms of `documentElement` appearance), z-index maximum, fades out after main interface is ready + duration met;
+- **Trace glass**: Intelligent transparency based on color saturation (JS polling), doesn't rely on volatile plugin class names;
+- **Auto-transcoding**: Encoding detection + ffmpeg (CRF 17 visually lossless) + transcoded version priority;
+- **Video duration detection**: ffmpeg `-i` parses `Duration`, drives animation duration slider upper limit.
 
 ## Directory Structure
 
 | Path | Description |
 | --- | --- |
-| `main.js` | Electron main process: configuration parsing, backend process management, window, tray, and close dialog |
-| `close-dialog/` | Close confirmation dialog (DSH-style frameless window): `index.html` + `preload.js` (button results sent back to main process) |
-| `scripts/render-icon.cjs` | Uses Electron to render the GUI official favicon (`apps/web/public/favicon.svg`, default black without fill) into a 512px icon base image (light rounded square + black official logo) |
-| `build/build-icons.ps1` | Generates `build/icon.png` (512) and `build/icon.ico` (16~256 multi-size) from the base image |
+| `main.js` | Electron main process: backend management, wallpaper/glass/transparency injection, splash screen, transcoding, settings dialog |
+| `main-preload.js` | Main window preload: title bar capabilities + splash layer injection + mode exposure |
+| `wallpaper-dialog/` | Interface settings dialog (frameless, draggable,置顶 on main window) |
+| `titlebar/` | Integrated title bar injection (CSS/JS/preload) |
+| `close-dialog/` | Close confirmation dialog (hide to tray / exit directly) |
 | `scripts/build-dist.ps1` | One-click build: render icon → deploy built-in runtime → repair closure → electron-builder |
-| `.toolchain/repair-staging.mjs` | Iteratively supplements missing workspace packages from pnpm deploy until the built-in runtime can start |
-| `build/node.exe` | Built-in Node runtime packaged during build (copied from local `node`), backend prioritizes it for startup |
-| `.npmrc` | Uses npmmirror mirror (registry / electron / electron-builder-binaries) |
+| `scripts/transcode-video.ps1` | Manual transcoding script (HEVC → H.264 CRF 17) |
+| `scripts/update-release.ps1` | Upload build artifacts to GitHub Release |
+| `.toolchain/` | Build toolchain (7za wrapper, mirror server, closure repair, ffmpeg) |
 
-> Note: `scripts/*.ps1`, `build/*.ps1` must remain pure ASCII (comments in English) — non-ASCII bytes will corrupt scripts under GBK decoding (tested to swallow line breaks and cause variable assignment failures).
+## 📦 Environment Dependencies
 
-## Development Run
+```bash
+Node.js + pnpm (required for building)
+DSH repository checkout (can override with `DSH_SOURCE_ROOT`)
+Network (npmmirror mirror)
+```
+
+## Install & Usage
 
 ```powershell
 npm install     # Install electron + electron-builder (via npmmirror mirror)
-npm start       # Launch desktop app directly in development mode
+npm start       # Launch in development mode (attach local 3080 or launch backend per config)
 ```
 
-## Packaging exe
-
-Self-contained distribution (recommended, output approximately 300~400MB, includes complete backend):
-
+Package exe:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build-dist.ps1
 ```
 
-Build machine requirements: Node.js + pnpm, DSH repository checkout (`G:\deepseek-harness`, can be overridden with `DSH_SOURCE_ROOT`), network (npmmirror). Process:
+Build machine requirements: Node.js + pnpm, DSH repository checkout (can override with `DSH_SOURCE_ROOT`), network (npmmirror). Output: portable exe + ZIP, approximately 300-400MB (includes complete backend + ffmpeg).
 
-1. `pnpm deploy` produces `@deepseek-ai/dsh`'s production closure (no symlinks, runtime dependencies only);
-2. `repair-staging.mjs` iteratively supplements missing workspace packages from deploy and tests startup;
-3. electron-builder packages the closure with built-in node.exe into `resources/runtime`.
+## Usage Example
 
-> Build environment notes (tested locally):
-> - The local process token lacks `SeCreateSymbolicLinkPrivilege`, causing electron-builder to fail when extracting winCodeSign due to two macOS symlinks. `build-dist.ps1` temporarily installs a 7za wrapper (compiled from `.toolchain\7za-wrapper.cs`) to suppress this error, automatically restoring after build.
-> - When electron-builder downloads electron-builder-binaries, `npm run` forces injection of `.npmrc` mirror addresses, so the build script calls electron-builder directly and starts a local mirror server (`.toolchain\mirror-server.js`, serving original packages) to ensure checksum consistency.
+```powershell
+# Development mode launch
+npm start
+
+# Package executable
+powershell -ExecutionPolicy Bypass -File scripts\build-dist.ps1
+
+# Run smoke test
+npm run smoke
+```
 
 ## Configuration
 
-Priority: Environment variables > Command-line arguments > Configuration file > Defaults.
+Configuration file: `%APPDATA%\DeepSeek Harness Desktop\config.json`; logs in same directory `logs/`.
 
-| Configuration | Environment Variable | Command-line Argument | Default |
-| --- | --- | --- | --- |
-| DSH repository root directory | `DSH_ROOT` | `--dsh-root=<path>` | `G:\deepseek-harness` |
-| Backend port | `DSH_PORT` | `--port=<n>` | `3080` |
-| Do not start backend | — | `--no-server` | Take over existing service |
-| Disable tray and close dialog | — | `--no-tray` | Click × to exit directly (legacy behavior) |
-| Automated verification | — | `--smoke-test` | Print `SMOKE_OK` on successful load and exit |
+| Key | Description | Default |
+| --- | --- | --- |
+| `wallpaper` | Wallpaper image/video path | none |
+| `sidebarWallpaper` | Sidebar independent wallpaper | share main image |
+| `wallpaperBlur` | Wallpaper blur px | 18 |
+| `wallpaperCodeAlpha` | Code block transparency | 0.45 |
+| `transparentNewSession/Input/Sidebar/Main` | Area transparency toggles | true |
+| `wallpaperVideoSound` | Video wallpaper sound | false |
+| `glassBlur` | Input box/trace glass blur px | 10 |
+| `panelAlpha` | Panel transparency | 0.55 |
+| `splashMode` | Splash screen mode default/follow/custom | default |
+| `splashFile` | Custom splash material | none |
+| `splashDuration` | Animation duration (seconds) | 0 |
+| `splashFade` | Fade-out duration (seconds) | 0.5 |
 
-Configuration file is located at `%APPDATA%\DeepSeek Harness Desktop\config.json` (automatically written after first successful launch), logs at `%APPDATA%\DeepSeek Harness Desktop\logs\`.
-
-## Tray and Close Behavior
-
-- Clicking the main window × (or Alt+F4) prompts a DSH-style close confirmation dialog: `Cancel` / `Exit Directly` / `Hide to Tray` (default, triggered by Enter; Esc cancels). After selecting hide, the window is only hidden, not destroyed, and the backend service continues running;
-- First hide displays a system tray bubble notification; subsequently, you can restore the window by clicking the tray icon, or right-click the menu to execute `Show Main Window` / `Hide Main Window` / `Open in Browser` / `Exit`;
-- Application menu "File → Hide to Tray" is equivalent to hiding in the close dialog; "File → Exit" performs a true exit, terminating the backend process;
-- Re-launching the app while hidden (or clicking shortcut) directly restores the main window (single instance);
-- The close confirmation dialog is an independent frameless window (`close-dialog/`, distributed with installer), dark theme consistent with GUI;
-- Passing `--no-tray` completely disables this feature, restoring the legacy "click × to exit" behavior (automatically disabled in smoke tests).
-
-## Smoke Test
+## Testing
 
 ```powershell
 npm run smoke   # Launch → wait for page load complete → print SMOKE_OK/SMOKE_FAIL and exit
 ```
 
-## Relationship with Official Project
+## Contributing
 
-This project is built on [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness).
+1. Fork the repo
+2. Create your feature branch (`git checkout -b feature/xxx`)
+3. Commit your changes (`git commit -m 'feat: add xxx'`)
+4. Push to the branch (`git push origin feature/xxx`)
+5. Open a Pull Request
 
-DeepSeek Harness's core capabilities, plugin system, and Web UI come from the official project. This project is mainly responsible for:
+## License
 
-- Desktop application packaging
-- Local service lifecycle management
-- Desktop window and system tray integration
-- Windows installer build and release
-- Interface adaptation for desktop environment
+This project uses the [MIT](LICENSE) license.
 
-If you wish to run Harness via command line or participate in core feature development, please refer to the official repository first.
+## Contact
+
+- GitHub: https://github.com/Qiongkura
+- WeChat: Qiongkura
 
 ## Known Limitations
 
-- The built-in runtime does not include `pnpm`, so plugin installation/management features in the GUI are unavailable (browsing and viewing are unaffected);
+- The built-in runtime does not include `pnpm`, so plugin installation/management features in the GUI are unavailable;
 - The built-in runtime is based on the DSH repository version at build time, requiring repackaging to follow upstream updates;
-- `--host 0.0.0.0` is prohibited by DSH officially (security design), desktop app fixed to use `127.0.0.1`;
-- If the port is occupied by another program, it will take over directly, please confirm that the port indeed runs DSH GUI.
+- If the port is occupied by another program, it will take over directly, please confirm that the port indeed runs DSH GUI;
+- HEVC transcoding takes several minutes first time (CRF 17 high bitrate), during which the original file is used (may stutter), automatically switches to transcoded version after completion.
+
+## Related Projects
+
+This project is built on [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness), responsible for desktop packaging and interface customization; DSH core capabilities, plugin system, and Web UI come from the official project.
