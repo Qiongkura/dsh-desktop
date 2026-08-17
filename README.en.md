@@ -9,6 +9,7 @@
 An Electron shell that packages the DeepSeek Harness Web GUI into a native desktop window with deep interface customization: wallpaper / frosted glass / liquid glass / splash screen / auto-transcoding, all configurable through the "Interface Settings" panel in Web settings.
 
 - **Self-contained distribution**: The installer includes a complete DSH backend runtime (approximately 250MB production closure). Any Windows x64 user can download, install, and double-click to run without installing Node.js / pnpm / cloning the repository;
+- **Token Usage Statistics**: The built-in runtime includes full token usage statistics (sidebar-bottom entry): group by date / model / session / workspace, sort by tokens, subagent usage merged into root sessions;
 - **Interface Settings**: Wallpaper, video wallpaper, blur, transparent areas, input box/trace liquid glass, splash screen (mode/material/duration/fade), HEVC auto-transcoding... all configurable in one panel (title bar/tray "Interface Settings..." quick access, configuration persisted in Electron config);
 - **Auto-detection and takeover**: Automatically detects `http://127.0.0.1:3080`: if GUI is already running, it directly takes over; otherwise, it launches the built-in backend;
 
@@ -32,6 +33,7 @@ An Electron shell that packages the DeepSeek Harness Web GUI into a native deskt
 | Video Wallpaper Protocol | `dsh-wallpaper://` privileged protocol, streams local videos (supports Range) |
 | Video Sound | Optional playback of wallpaper video sound |
 | Integrated Title Bar | Custom title bar: back/forward/menu/minimize/maximize/close |
+| Token Usage Statistics | Built-in latest DSH runtime: group by date/model/session/workspace, sort by token usage, subagent usage auto-merged into root sessions |
 
 ## Architecture & Implementation
 
