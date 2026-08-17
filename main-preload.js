@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld('dshInterfaceSettings', {
   commit: (settings) => ipcRenderer.send('dsh:interface-settings-commit', settings),
   pick: (kind) => ipcRenderer.invoke('dsh:interface-settings-pick', kind),
   clear: (kind) => ipcRenderer.send('dsh:interface-settings-clear', kind),
+  // 启动画面视频时长上限（秒）；无视频素材返回 null
+  splashDurationMax: () => ipcRenderer.invoke('dsh:interface-settings-splash-duration'),
 })
 
 // ------------------------------------------------------------ 壁纸式启动过渡 --

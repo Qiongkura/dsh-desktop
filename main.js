@@ -1557,7 +1557,8 @@ function applyInterfaceSettings(win, s, persist) {
     else patch.splashFile = s.splashFile
     if (s?.splashDuration !== undefined) {
       const d = Number(s.splashDuration)
-      patch.splashDuration = Number.isFinite(d) ? Math.max(0, Math.min(30, d)) : 0
+      // 上限与「动画时长」滑块一致（视频完整时长，最多 10 分钟）
+      patch.splashDuration = Number.isFinite(d) ? Math.max(0, Math.min(600, d)) : 0
     }
     if (s?.splashFade !== undefined) {
       const f = Number(s.splashFade)
@@ -1567,6 +1568,19 @@ function applyInterfaceSettings(win, s, persist) {
     log(`interface settings saved: blur=${patch.wallpaperBlur ?? '?'} codeAlpha=${patch.wallpaperCodeAlpha ?? '?'} glass=${patch.glassBlur ?? '?'} panelAlpha=${patch.panelAlpha ?? '?'} wallpaper=${wallpaper ?? '(none)'} sidebar=${side ?? '(shared)'} videoSound=${patch.wallpaperVideoSound ?? false} splashMode=${patch.splashMode ?? '?'}`)
   }
 }
+
+// 启动画面视频时长上限（秒）：当前启动媒体（custom=splashFile / follow=壁纸）为视频时
+// 返回 min(时长,600)，供 web 设置面板「动画时长」滑块自动扩容；无视频返回 null。
+ipcMain.handle('dsh:interface-settings-splash-duration', async () => {
+  const eff = resolveSplashFile(resolveWallpaper())
+  const file = eff === null ? null : eff.file
+  if (file === null || !isVideoWallpaper(file)) return null
+  return await new Promise((resolve) => {
+    videoDuration(file, (secs) => {
+      resolve(secs !== null && secs > 0 ? Math.min(secs, 600) : null)
+    })
+  })
+})
 
 // 同步读取（preload 用 sendSync，必须 on + returnValue；handle 只配 invoke）
 ipcMain.on('dsh:interface-settings-get', (event) => {
