@@ -1469,6 +1469,177 @@ function restoreWallpaperState() {
   }
 }
 
+// ================================================================
+// 界面设置桥：web 设置面板「界面设置」↔ Electron 配置/应用
+// 标题栏/托盘的「界面设置…」不再打开独立对话框，改为在主窗口打开
+// web 设置里的「界面设置」分类；web 端 dsh-interface-settings 插件
+// 经 window.dshInterfaceSettings 通道读写同一份 Electron config，
+// 并由主进程应用（含视频壁纸/视频声音等桌面独有能力）。
+// ================================================================
+
+/** 最近一次应用的壁纸/侧栏壁纸（预览时未变化不重建壁纸层）。 */
+let lastAppliedWallpaper = null
+let lastAppliedSidebar = null
+
+/** 当前界面设置快照（供 web 设置面板初始化）。 */
+function interfaceSettingsSnapshot() {
+  const wallpaper = configuredWallpaper()
+  const isVideo = wallpaper !== null && isVideoWallpaper(wallpaper)
+  return {
+    wallpaper: isVideo ? null : wallpaper,
+    wallpaperBlur: wallpaperBlur(),
+    codeAlpha: wallpaperCodeAlpha(),
+    sidebarWallpaper: configuredSidebarWallpaper(),
+    transparent: transparentFlags(),
+    glassBlur: glassBlur(),
+    panelAlpha: panelAlpha(),
+    splashMode: splashMode(),
+    splashFile: configuredSplashFile(),
+    splashDuration: splashDuration(),
+    splashFade: splashFade(),
+    videoWallpaper: isVideo ? wallpaper : null,
+    videoSound: wallpaperVideoSound(),
+  }
+}
+
+/** 应用界面设置（预览/保存共用）：win 主窗口，s 设置，persist 是否写入配置。 */
+function applyInterfaceSettings(win, s, persist) {
+  if (win === null || win.isDestroyed()) return
+  const blur = Number(s?.wallpaperBlur)
+  if (Number.isFinite(blur)) setWallpaperBlurVar(blur)
+  const code = Number(s?.codeAlpha)
+  if (Number.isFinite(code)) setCodeAlphaVar(code)
+  const glass = Number(s?.glassBlur)
+  if (Number.isFinite(glass)) setGlassBlurVar(glass)
+  const panel = Number(s?.panelAlpha)
+  if (Number.isFinite(panel)) setPanelAlphaVar(panel)
+  if (s?.transparent !== undefined) setTransparentFlags(s.transparent)
+  if (typeof s?.videoSound === 'boolean') setWallpaperVideoSoundLive(win, s.videoSound).catch(() => {})
+  // 壁纸：视频优先；null 清除。未变化不重建壁纸层（避免预览时视频重载闪烁）
+  const wallpaper = s?.videoWallpaper ?? s?.wallpaper ?? null
+  if (wallpaper !== lastAppliedWallpaper) {
+    applyWallpaper(win, wallpaper)
+    lastAppliedWallpaper = wallpaper
+  }
+  const side = s?.sidebarWallpaper ?? null
+  if (side !== lastAppliedSidebar) {
+    if (side === null) {
+      clearSidebarWallpaperLayer(win).catch((error) => log('sidebar clear failed:', String(error)))
+    } else {
+      setSidebarWallpaperFile(win, side).catch((error) => log('sidebar apply failed:', String(error)))
+    }
+    lastAppliedSidebar = side
+  }
+  if (persist) {
+    const patch = {}
+    if (s?.wallpaperBlur !== undefined) patch.wallpaperBlur = Math.max(0, Math.min(100, Number(s.wallpaperBlur) || 0))
+    if (s?.codeAlpha !== undefined) patch.wallpaperCodeAlpha = Math.max(0.08, Math.min(1, Number(s.codeAlpha) || 0.45))
+    if (s?.glassBlur !== undefined) patch.glassBlur = Math.max(0, Math.min(100, Number(s.glassBlur) || 0))
+    if (s?.panelAlpha !== undefined) {
+      const pn = Number(s.panelAlpha)
+      patch.panelAlpha = Number.isFinite(pn) ? Math.max(0, Math.min(1, pn)) : 0.55
+    }
+    if (s?.transparent !== undefined) {
+      patch.transparentNewSession = s.transparent.newSession !== false
+      patch.transparentInput = s.transparent.input !== false
+      patch.transparentSidebar = s.transparent.sidebar !== false
+      patch.transparentMain = s.transparent.main !== false
+    }
+    if (wallpaper === null) patch.wallpaper = undefined
+    else patch.wallpaper = wallpaper
+    if (side === null) patch.sidebarWallpaper = undefined
+    else patch.sidebarWallpaper = side
+    if (typeof s?.videoSound === 'boolean') patch.wallpaperVideoSound = s.videoSound
+    if (s?.splashMode !== undefined) {
+      patch.splashMode = ['default', 'follow', 'custom'].includes(s.splashMode) ? s.splashMode : 'default'
+    }
+    if (s?.splashFile === null || s?.splashFile === undefined) patch.splashFile = undefined
+    else patch.splashFile = s.splashFile
+    if (s?.splashDuration !== undefined) {
+      const d = Number(s.splashDuration)
+      patch.splashDuration = Number.isFinite(d) ? Math.max(0, Math.min(30, d)) : 0
+    }
+    if (s?.splashFade !== undefined) {
+      const f = Number(s.splashFade)
+      patch.splashFade = Number.isFinite(f) ? Math.max(0, Math.min(5, f)) : 0.5
+    }
+    saveConfig(patch)
+    log(`interface settings saved: blur=${patch.wallpaperBlur ?? '?'} codeAlpha=${patch.wallpaperCodeAlpha ?? '?'} glass=${patch.glassBlur ?? '?'} panelAlpha=${patch.panelAlpha ?? '?'} wallpaper=${wallpaper ?? '(none)'} sidebar=${side ?? '(shared)'} videoSound=${patch.wallpaperVideoSound ?? false} splashMode=${patch.splashMode ?? '?'}`)
+  }
+}
+
+// 同步读取（preload 用 sendSync，必须 on + returnValue；handle 只配 invoke）
+ipcMain.on('dsh:interface-settings-get', (event) => {
+  event.returnValue = interfaceSettingsSnapshot()
+})
+
+ipcMain.on('dsh:interface-settings-preview', (_event, s) => {
+  const win = mainWindow
+  if (win !== null && !win.isDestroyed()) applyInterfaceSettings(win, s, false)
+})
+
+ipcMain.on('dsh:interface-settings-commit', (_event, s) => {
+  const win = mainWindow
+  if (win !== null && !win.isDestroyed()) applyInterfaceSettings(win, s, true)
+})
+
+/** 原生文件选择：wallpaper（图片/视频）/ wallpaper-video（仅视频）/ sidebar / splash。 */
+ipcMain.handle('dsh:interface-settings-pick', async (_event, kind) => {
+  const win = mainWindow
+  if (win === null || win.isDestroyed()) return null
+  const videoOnly = kind === 'wallpaper-video'
+  const videoFilter = { name: '视频', extensions: ['mp4', 'm4v', 'webm', 'mov', 'ogv'] }
+  const imageFilter = { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }
+  const bothFilter = { name: '图片 / 视频', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'mp4', 'm4v', 'webm', 'mov', 'ogv'] }
+  const filters = videoOnly
+    ? [videoFilter]
+    : kind === 'splash'
+      ? [bothFilter, imageFilter, videoFilter]
+      : [bothFilter, imageFilter, videoFilter]
+  const title = videoOnly ? '选择视频壁纸'
+    : kind === 'splash' ? '选择启动画面素材' : '选择壁纸图片或视频'
+  const result = await dialog.showOpenDialog(win, { title, properties: ['openFile'], filters })
+  if (result.canceled || result.filePaths.length === 0) return null
+  const file = path.resolve(result.filePaths[0])
+  return { file, name: path.basename(file), isVideo: isVideoWallpaper(file) }
+})
+
+ipcMain.on('dsh:interface-settings-clear', (_event, kind) => {
+  const win = mainWindow
+  if (win === null || win.isDestroyed()) return
+  if (kind === 'wallpaper' || kind === 'wallpaper-video') {
+    applyWallpaper(win, null)
+    lastAppliedWallpaper = null
+    saveConfig({ wallpaper: undefined })
+  } else if (kind === 'sidebar') {
+    clearSidebarWallpaperLayer(win).catch((error) => log('sidebar clear failed:', String(error)))
+    lastAppliedSidebar = null
+    saveConfig({ sidebarWallpaper: undefined })
+  } else if (kind === 'splash') {
+    saveConfig({ splashFile: undefined })
+  }
+})
+
+/** 标题栏/托盘「界面设置…」：在主窗口打开设置面板并定位到「界面设置」分类。 */
+function openInterfaceSettingsInWeb() {
+  const win = mainWindow
+  if (win === null || win.isDestroyed()) return
+  win.webContents.executeJavaScript(`(async () => {
+    const trig = document.querySelector('button[aria-haspopup="dialog"]')
+    if (trig && trig.getAttribute('aria-expanded') !== 'true') trig.click()
+    const t0 = Date.now()
+    while (Date.now() - t0 < 5000) {
+      const nav = [...document.querySelectorAll('button')].find((b) => {
+        const text = (b.textContent || '').trim()
+        return text === '界面设置' || text === 'Interface Settings'
+      })
+      if (nav) { nav.click(); return true }
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    return false
+  })()`).catch((error) => log('open interface settings failed:', String(error)))
+}
+
 /** 文件菜单：打开壁纸设置对话框。 */
 async function showWallpaperDialog() {
   if (blurDialog !== null && !blurDialog.isDestroyed()) {
@@ -2142,7 +2313,7 @@ function createTray() {
     { label: '显示主窗口', click: showMainWindow },
     { label: '隐藏主窗口', click: hideToTray },
     { type: 'separator' },
-    { label: '界面设置…', click: () => { showMainWindow(); showWallpaperDialog() } },
+    { label: '界面设置…', click: () => { showMainWindow(); openInterfaceSettingsInWeb() } },
     { type: 'separator' },
     { label: '在浏览器中打开', click: () => shell.openExternal(`http://${DEFAULT_HOST}:${resolvePort()}`) },
     { type: 'separator' },
@@ -2239,7 +2410,7 @@ function menuSubmenus(runtime, url) {
     file: [
       { id: 'open-external', label: '在浏览器中打开' },
       { type: 'separator' },
-      { id: 'settings', label: '界面设置…' },
+      { id: 'settings', label: '界面设置…', click: () => { showMainWindow(); openInterfaceSettingsInWeb() } },
       { id: 'clear-wallpaper', label: '清除壁纸' },
       { type: 'separator' },
       { id: 'hide-tray', label: '隐藏到托盘', enabled: trayEnabled },
@@ -2271,7 +2442,7 @@ function runTitlebarAction(id) {
   const w = mainWindow
   switch (id) {
     case 'open-external': shell.openExternal(menuUrl); break
-    case 'settings': showWallpaperDialog(); break
+    case 'settings': openInterfaceSettingsInWeb(); break
     case 'clear-wallpaper': clearWallpaper(); break
     case 'hide-tray': hideToTray(); break
     case 'quit': appQuitting = true; app.quit(); break

@@ -13,7 +13,7 @@ An Electron shell that packages the DeepSeek Harness Web GUI into a native deskt
 - Otherwise, it launches the built-in backend (built-in node.exe + `@deepseek-ai/dsh`'s `lib/bin.js`), then opens the window when ready;
 - Clicking the × prompts a DeepSeek Harness-style query: **Hide to System Tray** or **Exit Directly**. After hiding, the application and backend continue running in the background, the taskbar icon disappears, and clicking/right-clicking the system tray icon restores or exits;
 - Supports single instance (re-launching while hidden restores the window), opening external links in the system browser, and menu bar shortcuts;
-- **Custom wallpaper**: Menu "File → Set Wallpaper…" selects an image, and the interface panel becomes a frosted glass effect; also supports `--wallpaper=<image path>` / `DSH_WALLPAPER` / config option `wallpaper`;
+- **Custom wallpaper**: The "Interface Settings…" entry in the titlebar/tray menu (or the "Interface Settings" section inside the Web settings) configures wallpaper, video wallpaper, blur, transparent areas, liquid glass, splash screen, HEVC auto-transcode and more — all persisted in the Electron config; also supports `--wallpaper=<image path>` / `DSH_WALLPAPER` / config option `wallpaper`;
 - Built-in mode isolates DSH_HOME to the application data directory (`%APPDATA%\DeepSeek Harness Desktop\home`), without interfering with existing installations;
 - Can be packaged as a green single-file exe (portable) or an unpack-and-use ZIP package.
 
