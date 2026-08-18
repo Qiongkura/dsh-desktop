@@ -1,8 +1,8 @@
 {
   "name": "dsh-desktop",
   "productName": "DeepSeek Harness Desktop",
-  "version": "0.2.0",
-  "description": "DeepSeek Harness Web GUI 桌面端：原生窗口 + 本地后端自动管理",
+  "version": "0.2.2",
+  "description": "DeepSeek Harness Web GUI 妗岄潰绔細鍘熺敓绐楀彛 + 鏈湴鍚庣鑷姩绠＄悊",
   "main": "main.js",
   "author": "dsh-desktop",
   "license": "MIT",
@@ -19,7 +19,7 @@
   "build": {
     "appId": "ai.deepseek.dsh-desktop",
     "productName": "DeepSeek Harness Desktop",
-    "copyright": "Copyright © 2025 DeepSeek Harness contributors",
+    "copyright": "Copyright 漏 2025 DeepSeek Harness contributors",
     "directories": {
       "output": "release",
       "buildResources": "build"
