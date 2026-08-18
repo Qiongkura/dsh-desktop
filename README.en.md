@@ -15,7 +15,7 @@
 >
 > Also: the `Animation duration` (minimum splash display seconds) defaults to 10s, which further lengthens perceived startup; it can be reduced.
 
-An Electron shell that packages the DeepSeek Harness Web GUI into a native desktop window with deep interface customization: wallpaper / frosted glass / liquid glass / splash screen / auto-transcoding, all configurable through the "Interface Settings" panel in Web settings.
+An Electron shell that packages the DeepSeek Harness Web GUI into a native desktop window with deep interface customization: wallpaper / frosted glass / liquid glass / splash screen / auto-transcoding, all configurable through the "Interface Settings" panel in the desktop app (title bar or tray menu).
 
 - **Self-contained distribution**: The installer includes a complete DSH backend runtime (approximately 250MB production closure). Any Windows x64 user can download, install, and double-click to run without installing Node.js / pnpm / cloning the repository;
 - **Token Usage Statistics**: The built-in runtime includes full token usage statistics (sidebar-bottom entry): group by date / model / session / workspace, sort by tokens, subagent usage merged into root sessions;
@@ -26,7 +26,7 @@ An Electron shell that packages the DeepSeek Harness Web GUI into a native deskt
 
 | Feature | Description |
 | --- | --- |
-| Wallpaper Image/Video | Select image/video as interface background via title bar/tray "Interface Settings..." or Web settings (supports dynamic video wallpapers) |
+| Wallpaper Image/Video | Select image/video as interface background via title bar/tray "Interface Settings..." (desktop only, not available on Web) |
 | Wallpaper Blur | Independent slider (0-100px), real-time blur on wallpaper layer |
 | Code Block Transparency | Independent slider (8%-100%), background color of code blocks in dialogs |
 | Area Transparency Toggles | Four independent toggles for new conversation / input box / left sidebar / main interface |
